@@ -9,9 +9,13 @@ LDFLAGS_STD ?= -lc -lutil
 
 STRIP ?= strip
 INSTALL ?= install
+GCOV ?= gcov
+LCOV ?= lcov
+GENHTML ?= genhtml
 
 PREFIX ?= /usr/local
 SHAREDIR ?= ${PREFIX}/share
+TEST_RUNNER ?= ./testsuite.sh
 
 SRC = abduco.c
 
@@ -24,14 +28,38 @@ config.mk:
 	@touch $@
 
 abduco: config.h config.mk *.c
-	${CC} ${CFLAGS} ${CFLAGS_STD} ${CFLAGS_AUTO} ${CFLAGS_EXTRA} ${SRC} ${LDFLAGS} ${LDFLAGS_STD} ${LDFLAGS_AUTO} -o $@
+	${CC} ${CFLAGS} ${CFLAGS_STD} ${CFLAGS_AUTO} ${CFLAGS_EXTRA} ${SRC} ${LDFLAGS} ${LDFLAGS_STD} ${LDFLAGS_AUTO} ${LDFLAGS_EXTRA} -o $@
 
 debug: clean
-	make CFLAGS_EXTRA='${CFLAGS_DEBUG}'
+	${MAKE} CFLAGS_EXTRA='${CFLAGS_DEBUG}'
+
+test: clean abduco
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		script -q /dev/null sh -c 'cat; ${TEST_RUNNER}' </dev/null; \
+	else \
+		script -q -e -c "sh -c 'cat; ${TEST_RUNNER}'" /dev/null </dev/null; \
+	fi
+
+coverage-gcov: clean
+	${MAKE} CFLAGS_EXTRA='-O0 -g --coverage' LDFLAGS_EXTRA='--coverage' abduco
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		script -q /dev/null sh -c 'cat; ${TEST_RUNNER}' </dev/null; \
+	else \
+		script -q -e -c 'sh -c "cat; ${TEST_RUNNER}"' /dev/null </dev/null; \
+	fi
+	${GCOV} -b -c ${SRC}
+
+coverage-html: coverage-gcov
+	${LCOV} --capture --directory . --output-file coverage.info
+	${GENHTML} coverage.info --output-directory coverage
+
+coverage: coverage-html
 
 clean:
 	@echo cleaning
-	@rm -f abduco abduco-*.tar.gz
+	@rm -f abduco abduco-*.tar.gz coverage.info typescript
+	@rm -f *.gcda *.gcno *.gcov
+	@rm -rf coverage
 
 dist: clean
 	@echo creating dist tarball
@@ -64,4 +92,4 @@ uninstall:
 	@echo removing zsh completion file from ${DESTDIR}${SHAREDIR}/zsh/site-functions
 	@rm -f ${DESTDIR}${SHAREDIR}/zsh/site-functions/_abduco
 
-.PHONY: all clean dist install installdirs install-strip install-completion uninstall debug
+.PHONY: all clean dist install installdirs install-strip install-completion uninstall debug test coverage coverage-gcov coverage-html

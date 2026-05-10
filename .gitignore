@@ -1,6 +1,9 @@
 /config.h
 /config.mk
 /abduco
+/coverage.info
+/coverage/
+/typescript
 *.css
 *.gcda
 *.gcno

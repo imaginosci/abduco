@@ -13,6 +13,7 @@ TESTS_RUN=0
 detach() {
 	sleep 1
 	printf ""
+	sleep 1
 }
 
 dvtm_cmd() {
@@ -58,8 +59,29 @@ expected_abduco_detached_output() {
 
 check_environment() {
 	[ "`$ABDUCO | wc -l`" -gt 1 ] && echo Abduco session exists && exit 1;
-	pgrep abduco && echo Abduco process exists && exit 1;
+	for pid in `pgrep abduco`; do
+		stat=`ps -o stat= -p "$pid" 2>/dev/null`
+		case "$stat" in
+		Z*) ;;
+		*) echo "$pid"; echo Abduco process exists; exit 1 ;;
+		esac
+	done
 	return 0;
+}
+
+wait_for_session() {
+	local name="$1"
+	local tries=10
+
+	while [ $tries -gt 0 ]; do
+		if $ABDUCO -d "$name"; then
+			return 0
+		fi
+		tries=$((tries - 1))
+		sleep 1
+	done
+
+	return 1
 }
 
 # diff wrapper that displays escape sequences visibly when there are differences
@@ -89,7 +111,7 @@ run_test_attached() {
 	local output_expected="$name.expected"
 
 	TESTS_RUN=$((TESTS_RUN + 1))
-	echo -n "Running test attached: $name "
+	printf "Running test attached: %s " "$name"
 	expected_abduco_attached_output "$name" "$cmd" > "$output_expected"
 
 	if $ABDUCO -c "$name" $cmd 2>&1 | sed 's/.$//' > "$output" && sleep 1 &&
@@ -114,7 +136,7 @@ run_test_detached() {
 	local output_expected="$name.expected"
 
 	TESTS_RUN=$((TESTS_RUN + 1))
-	echo -n "Running test detached: $name "
+	printf "Running test detached: %s " "$name"
 	expected_abduco_detached_output "$name" "$cmd" > "$output_expected"
 
 	if $ABDUCO -n "$name" $cmd >/dev/null 2>&1 && sleep 1 &&
@@ -140,7 +162,7 @@ run_test_attached_detached() {
 	local output_expected="$name.expected"
 
 	TESTS_RUN=$((TESTS_RUN + 1))
-	echo -n "Running test: $name "
+	printf "Running test: %s " "$name"
 	$cmd >/dev/null 2>&1
 	expected_abduco_epilog "$name" $? > "$output_expected"
 
@@ -158,7 +180,7 @@ run_test_attached_detached() {
 }
 
 run_test_dvtm() {
-	echo -n "Running dvtm test: "
+	printf "Running dvtm test: "
 	if ! which dvtm >/dev/null 2>&1; then
 		echo "SKIPPED"
 		return 0;
@@ -191,12 +213,12 @@ run_test_detect_session() {
 	local output_expected="$name.expected"
 
 	TESTS_RUN=$((TESTS_RUN + 1))
-	echo -n "Running test: $name "
+	printf "Running test: %s " "$name"
 	$cmd >/dev/null 2>&1
 	expected_abduco_epilog "$name" $? > "$output_expected"
 
-	if detach | $ABDUCO $ABDUCO_OPTS -c "$name" $cmd >/dev/null 2>&1 && sleep 3 &&
-       $ABDUCO -d "$name" &&
+	if detach | $ABDUCO $ABDUCO_OPTS -c "$name" $cmd >/dev/null 2>&1 &&
+	   wait_for_session "$name" &&
 	   $ABDUCO -a "$name" 2>&1 | tail -1 | sed 's/.$//' > "$output" &&
 	   diff_safe "$output_expected" "$output" && check_environment; then
 		rm "$output" "$output_expected"
@@ -259,7 +281,7 @@ run_test_eof_forward() {
 	local name="eof-forward"
 
 	TESTS_RUN=$((TESTS_RUN + 1))
-	echo -n "Running test: $name "
+	printf "Running test: %s " "$name"
 
 	# Run cat with piped input - cat should receive "hello", then EOF, then exit
 	if echo "hello" | $ABDUCO -c "$name" cat >/dev/null 2>&1 && sleep 1 &&
@@ -280,7 +302,7 @@ run_test_eof_devnull() {
 	local name="eof-devnull"
 
 	TESTS_RUN=$((TESTS_RUN + 1))
-	echo -n "Running test: $name "
+	printf "Running test: %s " "$name"
 
 	# Run cat with /dev/null stdin - cat should receive immediate EOF and exit
 	if $ABDUCO -c "$name" cat </dev/null >/dev/null 2>&1 && sleep 1 &&
