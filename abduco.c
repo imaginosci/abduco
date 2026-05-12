@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2013-2018 Marc André Tanner <mat at brain-dump.org>
  *
@@ -19,25 +20,15 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <signal.h>
 #include <libgen.h>
 #include <string.h>
 #include <limits.h>
 #include <dirent.h>
-#include <termios.h>
 #include <time.h>
-#include <unistd.h>
 #include <pwd.h>
 #include <sys/select.h>
 #include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <sys/types.h>
 #include <sys/wait.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <sys/queue.h>
 #if defined(__linux__) || defined(__CYGWIN__)
 # include <pty.h>
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
@@ -46,14 +37,11 @@
 # include <util.h>
 #endif
 
-#if defined CTRL && defined _AIX
-  #undef CTRL
-#endif
-#ifndef CTRL
-  #define CTRL(k)   ((k) & 0x1F)
-#endif
-
+#include "abduco.h"
+#include "client.h"
 #include "config.h"
+#include "debug.h"
+#include "server.h"
 
 #if defined(_AIX)
 # include "forkpty-aix.c"
@@ -61,93 +49,17 @@
 # include "forkpty-sunos.c"
 #endif
 
-#define countof(arr) (sizeof(arr) / sizeof((arr)[0]))
+Server server = { .running = true, .exit_status = -1, .host = "@localhost", .screen_rows = 0 };
+Client client;
+struct termios orig_term, cur_term;
+bool has_term, alternate_buffer, quiet, passthrough;
+int screen_max_rows = 120;
 
-enum PacketType {
-	MSG_CONTENT   = 0,
-	MSG_ATTACH    = 1,
-	MSG_DETACH    = 2,
-	MSG_RESIZE    = 3,
-	MSG_EXIT      = 4,
-	MSG_PID       = 5,
-	MSG_STDIN_EOF = 6,
-};
-
-typedef struct {
-	uint32_t type;
-	uint32_t len;
-	union {
-		char msg[4096 - 2*sizeof(uint32_t)];
-		struct {
-			uint16_t rows;
-			uint16_t cols;
-		} ws;
-		uint32_t i;
-		uint64_t l;
-	} u;
-} Packet;
-
-typedef struct Client Client;
-struct Client {
-	int socket;
-	enum {
-		STATE_CONNECTED,
-		STATE_ATTACHED,
-		STATE_DETACHED,
-		STATE_DISCONNECTED,
-	} state;
-	bool need_resize;
-	enum {
-		CLIENT_READONLY = 1 << 0,
-		CLIENT_LOWPRIORITY = 1 << 1,
-	} flags;
-	bool msg_exit_sent;
-	Client *next;
-};
-
-struct entry {
-	char *data;
-	int len;
-	bool complete;
-	TAILQ_ENTRY(entry) entries;
-};
-
-TAILQ_HEAD(screenhead, entry);
-
-typedef struct {
-	Client *clients;
-	int socket;
-	int pty;
-	int exit_status;
-	struct termios term;
-	struct winsize winsize;
-	struct screenhead screen;
-	int screen_rows;
-	pid_t pid;
-	volatile sig_atomic_t running;
-	const char *name;
-	const char *session_name;
-	char host[255];
-	bool read_pty;
-} Server;
-
-static Server server = { .running = true, .exit_status = -1, .host = "@localhost", .screen_rows = 0 };
-static Client client;
-static struct termios orig_term, cur_term;
-static bool has_term, alternate_buffer, quiet, passthrough;
-static int screen_max_rows = 120;
-
-static struct sockaddr_un sockaddr = {
+struct sockaddr_un sockaddr = {
 	.sun_family = AF_UNIX,
 };
 
-static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name);
-static void die(const char *s);
-static void info(const char *str, ...);
-
-#include "debug.c"
-
-static inline size_t packet_header_size() {
+static inline size_t packet_header_size(void) {
 	return offsetof(Packet, u);
 }
 
@@ -155,7 +67,7 @@ static size_t packet_size(Packet *pkt) {
 	return packet_header_size() + pkt->len;
 }
 
-static ssize_t write_all(int fd, const char *buf, size_t len) {
+ssize_t write_all(int fd, const char *buf, size_t len) {
 	debug("write_all(%d)\n", len);
 	ssize_t ret = len;
 	while (len > 0) {
@@ -173,7 +85,7 @@ static ssize_t write_all(int fd, const char *buf, size_t len) {
 	return ret;
 }
 
-static ssize_t read_all(int fd, char *buf, size_t len) {
+ssize_t read_all(int fd, char *buf, size_t len) {
 	debug("read_all(%d)\n", len);
 	ssize_t ret = len;
 	while (len > 0) {
@@ -193,16 +105,17 @@ static ssize_t read_all(int fd, char *buf, size_t len) {
 	return ret;
 }
 
-static bool send_packet(int socket, Packet *pkt) {
+bool send_packet(int socket, Packet *pkt) {
 	size_t size = packet_size(pkt);
 	if (size > sizeof(*pkt))
 		return false;
-	return write_all(socket, (char *)pkt, size) == size;
+	ssize_t written = write_all(socket, (char *)pkt, size);
+	return written >= 0 && (size_t)written == size;
 }
 
-static bool recv_packet(int socket, Packet *pkt) {
+bool recv_packet(int socket, Packet *pkt) {
 	ssize_t len = read_all(socket, (char*)pkt, packet_header_size());
-	if (len <= 0 || len != packet_header_size())
+	if (len <= 0 || (size_t)len != packet_header_size())
 		return false;
 	if (pkt->len > sizeof(pkt->u.msg)) {
 		pkt->len = 0;
@@ -210,16 +123,13 @@ static bool recv_packet(int socket, Packet *pkt) {
 	}
 	if (pkt->len > 0) {
 		len = read_all(socket, pkt->u.msg, pkt->len);
-		if (len <= 0 || len != pkt->len)
+		if (len <= 0 || (uint32_t)len != pkt->len)
 			return false;
 	}
 	return true;
 }
 
-#include "client.c"
-#include "server.c"
-
-static void info(const char *str, ...) {
+void info(const char *str, ...) {
 	va_list ap;
 	va_start(ap, str);
 	if (str && !quiet) {
@@ -231,7 +141,7 @@ static void info(const char *str, ...) {
 	va_end(ap);
 }
 
-static void die(const char *s) {
+void die(const char *s) {
 	perror(s);
 	exit(EXIT_FAILURE);
 }
@@ -285,7 +195,7 @@ static bool xsnprintf(char *buf, size_t size, const char *fmt, ...) {
 	va_end(ap);
 	if (n == -1)
 		return false;
-	if (n >= size) {
+	if ((size_t)n >= size) {
 		errno = ENAMETOOLONG;
 		return false;
 	}
@@ -400,7 +310,7 @@ static bool create_socket_dir(struct sockaddr_un *sockaddr) {
 	return false;
 }
 
-static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
+bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 	const size_t maxlen = sizeof(sockaddr->sun_path);
 	const char *session_name = NULL;
 	char buf[maxlen];

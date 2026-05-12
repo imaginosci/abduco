@@ -1,3 +1,15 @@
+// SPDX-License-Identifier: ISC
+#include <errno.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/select.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+
+#include "debug.h"
+#include "server.h"
+
 #define FD_SET_MAX(fd, set, maxfd) do { \
 		FD_SET(fd, set);        \
 		if (fd > maxfd)         \
@@ -18,7 +30,7 @@ static void client_free(Client *c) {
 	free(c);
 }
 
-static void server_sink_client() {
+static void server_sink_client(void) {
 	if (!server.clients || !server.clients->next)
 		return;
 	Client *target = server.clients;
@@ -43,7 +55,7 @@ static void server_mark_socket_exec(bool exec, bool usr) {
 	chmod(sockaddr.sun_path, mode);
 }
 
-static int server_create_socket(const char *name) {
+int server_create_socket(const char *name) {
 	if (!set_socket_name(&sockaddr, name))
 		return -1;
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -68,7 +80,7 @@ static int server_create_socket(const char *name) {
 	return fd;
 }
 
-static int server_set_socket_non_blocking(int sock) {
+int server_set_socket_non_blocking(int sock) {
 	int flags;
 	if ((flags = fcntl(sock, F_GETFL, 0)) == -1)
 		flags = 0;
@@ -91,7 +103,8 @@ static bool server_read_pty(Packet *pkt) {
 static bool server_write_pty(Packet *pkt) {
 	print_packet("server-write-pty:", pkt);
 	size_t size = pkt->len;
-	if (write_all(server.pty, pkt->u.msg, size) == size)
+	ssize_t written = write_all(server.pty, pkt->u.msg, size);
+	if (written >= 0 && (size_t)written == size)
 		return true;
 	debug("FAILED\n");
 	server.running = false;
@@ -117,7 +130,8 @@ static bool server_send_packet(Client *c, Packet *pkt) {
 	return false;
 }
 
-static void server_pty_died_handler(int sig) {
+void server_pty_died_handler(int sig) {
+	(void)sig;
 	int errsv = errno;
 	pid_t pid;
 
@@ -132,7 +146,8 @@ static void server_pty_died_handler(int sig) {
 	errno = errsv;
 }
 
-static void server_sigterm_handler(int sig) {
+void server_sigterm_handler(int sig) {
+	(void)sig;
 	exit(EXIT_FAILURE); /* invoke atexit handler */
 }
 
@@ -165,7 +180,8 @@ error:
 	return NULL;
 }
 
-static void server_sigusr1_handler(int sig) {
+void server_sigusr1_handler(int sig) {
+	(void)sig;
 	int socket = server_create_socket(server.session_name);
 	if (socket != -1) {
 		if (server.socket)
@@ -265,7 +281,7 @@ static void server_preserve_screen_data(Packet *pkt) {
 	}
 }
 
-static void server_mainloop(void) {
+void server_mainloop(void) {
 	atexit(server_atexit_handler);
 	fd_set new_readfds, new_writefds;
 	FD_ZERO(&new_readfds);

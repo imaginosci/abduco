@@ -1,4 +1,14 @@
-static void client_sigwinch_handler(int sig) {
+// SPDX-License-Identifier: ISC
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/select.h>
+
+#include "client.h"
+#include "debug.h"
+
+void client_sigwinch_handler(int sig) {
+	(void)sig;
 	client.need_resize = true;
 }
 
@@ -11,7 +21,7 @@ static bool client_send_packet(Packet *pkt) {
 	return false;
 }
 
-static bool client_recv_packet(Packet *pkt) {
+bool client_recv_packet(Packet *pkt) {
 	if (recv_packet(server.socket, pkt)) {
 		print_packet("client-recv:", pkt);
 		return true;
@@ -21,7 +31,7 @@ static bool client_recv_packet(Packet *pkt) {
 	return false;
 }
 
-static void client_restore_terminal(void) {
+void client_restore_terminal(void) {
 	if (!has_term)
 		return;
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
@@ -32,7 +42,7 @@ static void client_restore_terminal(void) {
 	}
 }
 
-static void client_setup_terminal(void) {
+void client_setup_terminal(void) {
 	if (!has_term)
 		return;
 	atexit(client_restore_terminal);
@@ -55,7 +65,7 @@ static void client_setup_terminal(void) {
 	}
 }
 
-static int client_mainloop(void) {
+int client_mainloop(void) {
 	sigset_t emptyset, blockset;
 	sigemptyset(&emptyset);
 	sigemptyset(&blockset);

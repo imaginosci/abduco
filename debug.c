@@ -1,16 +1,29 @@
+// SPDX-License-Identifier: ISC
+#include <inttypes.h>
+#include <stdarg.h>
+#include <stdio.h>
+
+#include "debug.h"
+
 #ifdef NDEBUG
-static void debug(const char *errstr, ...) { }
-static void print_packet(const char *prefix, Packet *pkt) { }
+void debug(const char *errstr, ...) {
+	(void)errstr;
+}
+
+void print_packet(const char *prefix, Packet *pkt) {
+	(void)prefix;
+	(void)pkt;
+}
 #else
 
-static void debug(const char *errstr, ...) {
+void debug(const char *errstr, ...) {
 	va_list ap;
 	va_start(ap, errstr);
 	vfprintf(stderr, errstr, ap);
 	va_end(ap);
 }
 
-static void print_packet(const char *prefix, Packet *pkt) {
+void print_packet(const char *prefix, Packet *pkt) {
 	static const char *msgtype[] = {
 		[MSG_CONTENT] = "CONTENT",
 		[MSG_ATTACH]  = "ATTACH",

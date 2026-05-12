@@ -17,7 +17,8 @@ PREFIX ?= /usr/local
 SHAREDIR ?= ${PREFIX}/share
 TEST_RUNNER ?= ./tests/run.sh
 
-SRC = abduco.c
+SRC = abduco.c client.c server.c debug.c
+OBJ = ${SRC:.c=.o}
 
 all: abduco
 
@@ -27,8 +28,13 @@ config.h:
 config.mk:
 	@touch $@
 
-abduco: config.h config.mk *.c
-	${CC} ${CFLAGS} ${CFLAGS_STD} ${CFLAGS_AUTO} ${CFLAGS_EXTRA} ${SRC} ${LDFLAGS} ${LDFLAGS_STD} ${LDFLAGS_AUTO} ${LDFLAGS_EXTRA} -o $@
+abduco: ${OBJ}
+	${CC} ${OBJ} ${LDFLAGS} ${LDFLAGS_STD} ${LDFLAGS_AUTO} ${LDFLAGS_EXTRA} -o $@
+
+.c.o:
+	${CC} ${CFLAGS} ${CFLAGS_STD} ${CFLAGS_AUTO} ${CFLAGS_EXTRA} -c $< -o $@
+
+${OBJ}: config.h config.mk abduco.h client.h server.h debug.h
 
 debug: clean
 	${MAKE} CFLAGS_EXTRA='${CFLAGS_DEBUG}'
@@ -49,7 +55,7 @@ coverage: coverage-html
 
 clean:
 	@echo cleaning
-	@rm -f abduco abduco-*.tar.gz coverage.info typescript
+	@rm -f abduco abduco-*.tar.gz coverage.info typescript *.o
 	@rm -f *.gcda *.gcno *.gcov
 	@rm -rf coverage
 
