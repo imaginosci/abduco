@@ -46,7 +46,7 @@ static void server_sink_client(void) {
 
 static void server_mark_socket_exec(bool exec, bool usr) {
 	struct stat sb;
-	if (stat(sockaddr.sun_path, &sb) == -1)
+	if (stat(session_socket_path(), &sb) == -1)
 		return;
 	mode_t mode = sb.st_mode;
 	mode_t flag = usr ? S_IXUSR : S_IXGRP;
@@ -54,18 +54,17 @@ static void server_mark_socket_exec(bool exec, bool usr) {
 		mode |= flag;
 	else
 		mode &= ~flag;
-	chmod(sockaddr.sun_path, mode);
+	chmod(session_socket_path(), mode);
 }
 
 int server_create_socket(const char *name) {
-	if (!set_socket_name(&sockaddr, name))
+	if (!session_set_socket_name(name))
 		return -1;
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (fd == -1)
 		return -1;
-	socklen_t socklen = offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1;
 	mode_t mask = umask(S_IXUSR|S_IRWXG|S_IRWXO);
-	int r = bind(fd, (struct sockaddr*)&sockaddr, socklen);
+	int r = bind(fd, (struct sockaddr*)session_socket_addr(), session_socket_len());
 	umask(mask);
 
 	if (r == -1) {
@@ -74,7 +73,7 @@ int server_create_socket(const char *name) {
 	}
 
 	if (listen(fd, 5) == -1) {
-		unlink(sockaddr.sun_path);
+		session_unlink_socket();
 		close(fd);
 		return -1;
 	}
@@ -196,10 +195,6 @@ void server_sigusr1_handler(int sig) {
 	}
 }
 
-static void server_atexit_handler(void) {
-	unlink(sockaddr.sun_path);
-}
-
 static void server_send_screen_buffer(Client *c) {
 	struct entry *np;
 
@@ -288,7 +283,7 @@ static void server_preserve_screen_data(Packet *pkt) {
 }
 
 void server_mainloop(void) {
-	atexit(server_atexit_handler);
+	atexit(session_unlink_socket);
 	fd_set new_readfds, new_writefds;
 	FD_ZERO(&new_readfds);
 	FD_ZERO(&new_writefds);

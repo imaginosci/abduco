@@ -113,13 +113,16 @@ struct Dir {
 };
 
 extern Server server;
-extern struct sockaddr_un sockaddr;
 
 ssize_t write_all(int fd, const char *buf, size_t len);
 ssize_t read_all(int fd, char *buf, size_t len);
 bool send_packet(int socket, Packet *pkt);
 bool recv_packet(int socket, Packet *pkt);
-bool set_socket_name(struct sockaddr_un *sockaddr, const char *name);
+bool session_set_socket_name(const char *name);
+struct sockaddr_un *session_socket_addr(void);
+socklen_t session_socket_len(void);
+const char *session_socket_path(void);
+void session_unlink_socket(void);
 void die(const char *s);
 void info(const char *str, ...);
 

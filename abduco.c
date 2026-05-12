@@ -52,7 +52,7 @@
 Server server = { .running = true, .exit_status = -1, .host = "@localhost", .screen_rows = 0 };
 static bool quiet;
 
-struct sockaddr_un sockaddr = {
+static struct sockaddr_un sockaddr = {
 	.sun_family = AF_UNIX,
 };
 
@@ -202,12 +202,11 @@ static bool xsnprintf(char *buf, size_t size, const char *fmt, ...) {
 static int session_connect(const char *name) {
 	int fd;
 	struct stat sb;
-	if (!set_socket_name(&sockaddr, name) || (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+	if (!session_set_socket_name(name) || (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		return -1;
-	socklen_t socklen = offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1;
-	if (connect(fd, (struct sockaddr*)&sockaddr, socklen) == -1) {
-		if (errno == ECONNREFUSED && stat(sockaddr.sun_path, &sb) == 0 && S_ISSOCK(sb.st_mode))
-			unlink(sockaddr.sun_path);
+	if (connect(fd, (struct sockaddr*)session_socket_addr(), session_socket_len()) == -1) {
+		if (errno == ECONNREFUSED && stat(session_socket_path(), &sb) == 0 && S_ISSOCK(sb.st_mode))
+			session_unlink_socket();
 		close(fd);
 		return -1;
 	}
@@ -228,7 +227,7 @@ static pid_t session_exists(const char *name) {
 static bool session_alive(const char *name) {
 	struct stat sb;
 	return session_exists(name) &&
-	       stat(sockaddr.sun_path, &sb) == 0 &&
+	       stat(session_socket_path(), &sb) == 0 &&
 	       S_ISSOCK(sb.st_mode) && (sb.st_mode & S_IXGRP) == 0;
 }
 
@@ -307,7 +306,7 @@ static bool create_socket_dir(struct sockaddr_un *sockaddr) {
 	return false;
 }
 
-bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
+static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 	const size_t maxlen = sizeof(sockaddr->sun_path);
 	const char *session_name = NULL;
 	char buf[maxlen];
@@ -344,6 +343,26 @@ bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 	setenv("ABDUCO_SOCKET", sockaddr->sun_path, 1);
 
 	return true;
+}
+
+bool session_set_socket_name(const char *name) {
+	return set_socket_name(&sockaddr, name);
+}
+
+struct sockaddr_un *session_socket_addr(void) {
+	return &sockaddr;
+}
+
+socklen_t session_socket_len(void) {
+	return offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1;
+}
+
+const char *session_socket_path(void) {
+	return sockaddr.sun_path;
+}
+
+void session_unlink_socket(void) {
+	unlink(sockaddr.sun_path);
 }
 
 static bool create_session(const char *name, char * const argv[]) {
@@ -461,7 +480,7 @@ static bool create_session(const char *name, char * const argv[]) {
 		ssize_t len = read_all(client_pipe[0], errormsg, sizeof(errormsg));
 		if (len > 0) {
 			write_all(STDERR_FILENO, errormsg, len);
-			unlink(sockaddr.sun_path);
+			session_unlink_socket();
 			exit(EXIT_FAILURE);
 		}
 		close(client_pipe[0]);
@@ -517,10 +536,10 @@ static int session_comparator(const struct dirent **a, const struct dirent **b) 
 static int list_session(void) {
 	if (!create_socket_dir(&sockaddr))
 		return 1;
-	if (chdir(sockaddr.sun_path) == -1)
+	if (chdir(session_socket_path()) == -1)
 		die("list-session");
 	struct dirent **namelist;
-	int n = scandir(sockaddr.sun_path, &namelist, session_filter, session_comparator);
+	int n = scandir(session_socket_path(), &namelist, session_filter, session_comparator);
 	if (n < 0)
 		return 1;
 	printf("Active sessions (on host %s)\n", server.host+1);
