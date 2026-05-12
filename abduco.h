@@ -94,7 +94,7 @@ typedef struct {
 	int socket;
 	int pty;
 	int exit_status;
-	struct termios term;
+	struct termios *term;
 	struct winsize winsize;
 	struct screenhead screen;
 	int screen_rows;
@@ -113,13 +113,7 @@ struct Dir {
 };
 
 extern Server server;
-extern Client client;
-extern struct termios orig_term, cur_term;
-extern bool has_term, alternate_buffer, quiet, passthrough;
-extern int screen_max_rows;
 extern struct sockaddr_un sockaddr;
-extern char KEY_DETACH;
-extern char KEY_REDRAW;
 
 ssize_t write_all(int fd, const char *buf, size_t len);
 ssize_t read_all(int fd, char *buf, size_t len);

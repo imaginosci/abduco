@@ -10,6 +10,8 @@
 #include "debug.h"
 #include "server.h"
 
+static int screen_max_rows = 120;
+
 #define FD_SET_MAX(fd, set, maxfd) do { \
 		FD_SET(fd, set);        \
 		if (fd > maxfd)         \
@@ -85,6 +87,10 @@ int server_set_socket_non_blocking(int sock) {
 	if ((flags = fcntl(sock, F_GETFL, 0)) == -1)
 		flags = 0;
     	return fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+}
+
+void server_set_screen_max_rows(int rows) {
+	screen_max_rows = rows;
 }
 
 static bool server_read_pty(Packet *pkt) {

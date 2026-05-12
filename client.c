@@ -7,6 +7,11 @@
 #include "client.h"
 #include "debug.h"
 
+static Client client;
+static struct termios orig_term, cur_term;
+static bool has_term, alternate_buffer, passthrough;
+static char detach_key, redraw_key;
+
 void client_sigwinch_handler(int sig) {
 	(void)sig;
 	client.need_resize = true;
@@ -29,6 +34,26 @@ bool client_recv_packet(Packet *pkt) {
 	debug("client-recv: FAILED\n");
 	server.running = false;
 	return false;
+}
+
+void client_add_flags(int flags) {
+	client.flags |= flags;
+}
+
+void client_set_keys(char detach, char redraw) {
+	detach_key = detach;
+	redraw_key = redraw;
+}
+
+void client_set_passthrough(bool enabled) {
+	passthrough = enabled;
+}
+
+struct termios *client_capture_terminal(void) {
+	if (tcgetattr(STDIN_FILENO, &orig_term) == -1)
+		return NULL;
+	has_term = true;
+	return &orig_term;
 }
 
 void client_restore_terminal(void) {
@@ -134,9 +159,9 @@ int client_mainloop(void) {
 			if (len > 0) {
 				debug("client-stdin: %c\n", pkt.u.msg[0]);
 				pkt.len = len;
-				if (KEY_REDRAW && pkt.u.msg[0] == KEY_REDRAW) {
+				if (redraw_key && pkt.u.msg[0] == redraw_key) {
 					client.need_resize = true;
-				} else if (pkt.u.msg[0] == KEY_DETACH) {
+				} else if (pkt.u.msg[0] == detach_key) {
 					pkt.type = MSG_DETACH;
 					pkt.len = 0;
 					client_send_packet(&pkt);

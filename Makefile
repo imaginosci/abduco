@@ -4,6 +4,11 @@ VERSION = 0.7
 
 CFLAGS_STD ?= -std=c99 -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -DNDEBUG
 CFLAGS_STD += -DVERSION=\"${VERSION}\"
+STRICT_CFLAGS = -Wall -Wextra -Wmissing-prototypes -Wstrict-prototypes
+
+ifdef STRICT
+CFLAGS_EXTRA += ${STRICT_CFLAGS}
+endif
 
 LDFLAGS_STD ?= -lc -lutil
 

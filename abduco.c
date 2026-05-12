@@ -50,10 +50,7 @@
 #endif
 
 Server server = { .running = true, .exit_status = -1, .host = "@localhost", .screen_rows = 0 };
-Client client;
-struct termios orig_term, cur_term;
-bool has_term, alternate_buffer, quiet, passthrough;
-int screen_max_rows = 120;
+static bool quiet;
 
 struct sockaddr_un sockaddr = {
 	.sun_family = AF_UNIX,
@@ -390,7 +387,7 @@ static bool create_session(const char *name, char * const argv[]) {
 			sigemptyset(&sa.sa_mask);
 			sa.sa_handler = server_pty_died_handler;
 			sigaction(SIGCHLD, &sa, NULL);
-			switch (server.pid = forkpty(&server.pty, NULL, has_term ? &server.term : NULL, &server.winsize)) {
+			switch (server.pid = forkpty(&server.pty, NULL, server.term, &server.winsize)) {
 			case 0: /* child = user application process */
 				close(server.socket);
 				close(server_pipe[0]);
@@ -554,6 +551,7 @@ static int list_session(void) {
 int main(int argc, char *argv[]) {
 	int opt;
 	bool force = false;
+	bool passthrough = false;
 	char **cmd = NULL, action = '\0';
 
 	char *default_cmd[4] = { "/bin/sh", "-c", getenv("ABDUCO_CMD"), NULL };
@@ -594,19 +592,20 @@ int main(int argc, char *argv[]) {
 			quiet = true;
 			break;
 		case 'r':
-			client.flags |= CLIENT_READONLY;
+			client_add_flags(CLIENT_READONLY);
 			break;
 		case 'l':
-			client.flags |= CLIENT_LOWPRIORITY;
+			client_add_flags(CLIENT_LOWPRIORITY);
 			break;
 		case 'L':
 			if (!optarg)
 				 usage();
-			screen_max_rows = atoi(optarg);
+			int screen_max_rows = atoi(optarg);
 			if (screen_max_rows < 0) {
 				fputs("ERROR: a negative value for the number of rows is meaningless.\n", stderr);
 				usage();
 			}
+			server_set_screen_max_rows(screen_max_rows);
 			break;
 		case 'v':
 			puts("abduco-"VERSION" © 2013-2018 Marc André Tanner");
@@ -633,18 +632,18 @@ int main(int argc, char *argv[]) {
 		if (!action)
 			action = 'a';
 		quiet = true;
-		client.flags |= CLIENT_LOWPRIORITY;
+		client_add_flags(CLIENT_LOWPRIORITY);
 	}
+	client_set_passthrough(passthrough);
+	client_set_keys(KEY_DETACH, KEY_REDRAW);
 
 	if (!action && !server.session_name)
 		exit(list_session());
 	if (!action || !server.session_name)
 		usage();
 
-	if (!passthrough && tcgetattr(STDIN_FILENO, &orig_term) != -1) {
-		server.term = orig_term;
-		has_term = true;
-	}
+	if (!passthrough)
+		server.term = client_capture_terminal();
 
 	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &server.winsize) == -1) {
 		server.winsize.ws_col = 80;
