@@ -15,7 +15,7 @@ GENHTML ?= genhtml
 
 PREFIX ?= /usr/local
 SHAREDIR ?= ${PREFIX}/share
-TEST_RUNNER ?= ./testsuite.sh
+TEST_RUNNER ?= ./tests/run.sh
 
 SRC = abduco.c
 
@@ -34,19 +34,11 @@ debug: clean
 	${MAKE} CFLAGS_EXTRA='${CFLAGS_DEBUG}'
 
 test: clean abduco
-	@if [ "$$(uname)" = "Darwin" ]; then \
-		script -q /dev/null sh -c 'cat; ${TEST_RUNNER}' </dev/null; \
-	else \
-		script -q -e -c "sh -c 'cat; ${TEST_RUNNER}'" /dev/null </dev/null; \
-	fi
+	${TEST_RUNNER}
 
 coverage-gcov: clean
 	${MAKE} CFLAGS_EXTRA='-O0 -g --coverage' LDFLAGS_EXTRA='--coverage' abduco
-	@if [ "$$(uname)" = "Darwin" ]; then \
-		script -q /dev/null sh -c 'cat; ${TEST_RUNNER}' </dev/null; \
-	else \
-		script -q -e -c 'sh -c "cat; ${TEST_RUNNER}"' /dev/null </dev/null; \
-	fi
+	${TEST_RUNNER}
 	${GCOV} -b -c ${SRC}
 
 coverage-html: coverage-gcov
