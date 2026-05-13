@@ -22,7 +22,7 @@ PREFIX ?= /usr/local
 SHAREDIR ?= ${PREFIX}/share
 TEST_RUNNER ?= ./tests/run.sh
 
-SRC = abduco.c client.c server.c debug.c
+SRC = abduco.c client.c server.c debug.c io.c packet.c
 OBJ = ${SRC:.c=.o}
 
 all: abduco
@@ -39,7 +39,7 @@ abduco: ${OBJ}
 .c.o:
 	${CC} ${CFLAGS} ${CFLAGS_STD} ${CFLAGS_AUTO} ${CFLAGS_EXTRA} -c $< -o $@
 
-${OBJ}: config.h config.mk abduco.h client.h server.h debug.h
+${OBJ}: config.h config.mk abduco.h client.h server.h debug.h io.h packet.h
 
 debug: clean
 	${MAKE} CFLAGS_EXTRA='${CFLAGS_DEBUG}'

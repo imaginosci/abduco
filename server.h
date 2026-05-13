@@ -3,6 +3,7 @@
 #define SERVER_H
 
 #include "abduco.h"
+#include "packet.h"
 
 int server_create_socket(const char *name);
 int server_set_socket_non_blocking(int sock);

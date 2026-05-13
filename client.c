@@ -6,6 +6,7 @@
 
 #include "client.h"
 #include "debug.h"
+#include "io.h"
 
 static Client client;
 static struct termios orig_term, cur_term;

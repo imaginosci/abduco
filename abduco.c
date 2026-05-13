@@ -41,6 +41,8 @@
 #include "client.h"
 #include "config.h"
 #include "debug.h"
+#include "io.h"
+#include "packet.h"
 #include "server.h"
 
 #if defined(_AIX)
@@ -54,76 +56,6 @@ static bool quiet;
 static struct sockaddr_un sockaddr = {
 	.sun_family = AF_UNIX,
 };
-
-static inline size_t packet_header_size(void) {
-	return offsetof(Packet, u);
-}
-
-static size_t packet_size(Packet *pkt) {
-	return packet_header_size() + pkt->len;
-}
-
-ssize_t write_all(int fd, const char *buf, size_t len) {
-	debug("write_all(%d)\n", len);
-	ssize_t ret = len;
-	while (len > 0) {
-		ssize_t res = write(fd, buf, len);
-		if (res < 0) {
-			if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-				continue;
-			return -1;
-		}
-		if (res == 0)
-			return ret - len;
-		buf += res;
-		len -= res;
-	}
-	return ret;
-}
-
-ssize_t read_all(int fd, char *buf, size_t len) {
-	debug("read_all(%d)\n", len);
-	ssize_t ret = len;
-	while (len > 0) {
-		ssize_t res = read(fd, buf, len);
-		if (res < 0) {
-			if (errno == EWOULDBLOCK)
-				return ret - len;
-			if (errno == EAGAIN || errno == EINTR)
-				continue;
-			return -1;
-		}
-		if (res == 0)
-			return ret - len;
-		buf += res;
-		len -= res;
-	}
-	return ret;
-}
-
-bool send_packet(int socket, Packet *pkt) {
-	size_t size = packet_size(pkt);
-	if (size > sizeof(*pkt))
-		return false;
-	ssize_t written = write_all(socket, (char *)pkt, size);
-	return written >= 0 && (size_t)written == size;
-}
-
-bool recv_packet(int socket, Packet *pkt) {
-	ssize_t len = read_all(socket, (char*)pkt, packet_header_size());
-	if (len <= 0 || (size_t)len != packet_header_size())
-		return false;
-	if (pkt->len > sizeof(pkt->u.msg)) {
-		pkt->len = 0;
-		return false;
-	}
-	if (pkt->len > 0) {
-		len = read_all(socket, pkt->u.msg, pkt->len);
-		if (len <= 0 || (uint32_t)len != pkt->len)
-			return false;
-	}
-	return true;
-}
 
 static void info(const Server *srv, const char *str, ...) {
 	va_list ap;

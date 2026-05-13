@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 
 #include "debug.h"
+#include "io.h"
 #include "server.h"
 
 static int screen_max_rows = 120;

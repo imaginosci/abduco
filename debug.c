@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#include "abduco.h"
 #include "debug.h"
 
 #ifdef NDEBUG

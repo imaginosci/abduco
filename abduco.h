@@ -19,7 +19,6 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <signal.h>
 #include <termios.h>
 #include <unistd.h>
@@ -37,30 +36,6 @@
 #endif
 
 #define countof(arr) (sizeof(arr) / sizeof((arr)[0]))
-
-enum PacketType {
-	MSG_CONTENT   = 0,
-	MSG_ATTACH    = 1,
-	MSG_DETACH    = 2,
-	MSG_RESIZE    = 3,
-	MSG_EXIT      = 4,
-	MSG_PID       = 5,
-	MSG_STDIN_EOF = 6,
-};
-
-typedef struct {
-	uint32_t type;
-	uint32_t len;
-	union {
-		char msg[4096 - 2*sizeof(uint32_t)];
-		struct {
-			uint16_t rows;
-			uint16_t cols;
-		} ws;
-		uint32_t i;
-		uint64_t l;
-	} u;
-} Packet;
 
 typedef struct Client Client;
 struct Client {
@@ -112,10 +87,6 @@ struct Dir {
 	bool personal;
 };
 
-ssize_t write_all(int fd, const char *buf, size_t len);
-ssize_t read_all(int fd, char *buf, size_t len);
-bool send_packet(int socket, Packet *pkt);
-bool recv_packet(int socket, Packet *pkt);
 bool session_set_socket_name(const Server *srv, const char *name);
 struct sockaddr_un *session_socket_addr(void);
 socklen_t session_socket_len(void);

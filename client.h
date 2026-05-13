@@ -3,6 +3,7 @@
 #define CLIENT_H
 
 #include "abduco.h"
+#include "packet.h"
 
 void client_sigwinch_handler(int sig);
 bool client_recv_packet(Server *srv, Packet *pkt);
