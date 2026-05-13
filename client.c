@@ -17,22 +17,22 @@ void client_sigwinch_handler(int sig) {
 	client.need_resize = true;
 }
 
-static bool client_send_packet(Packet *pkt) {
+static bool client_send_packet(Server *srv, Packet *pkt) {
 	print_packet("client-send:", pkt);
-	if (send_packet(server.socket, pkt))
+	if (send_packet(srv->socket, pkt))
 		return true;
 	debug("FAILED\n");
-	server.running = false;
+	srv->running = false;
 	return false;
 }
 
-bool client_recv_packet(Packet *pkt) {
-	if (recv_packet(server.socket, pkt)) {
+bool client_recv_packet(Server *srv, Packet *pkt) {
+	if (recv_packet(srv->socket, pkt)) {
 		print_packet("client-recv:", pkt);
 		return true;
 	}
 	debug("client-recv: FAILED\n");
-	server.running = false;
+	srv->running = false;
 	return false;
 }
 
@@ -90,7 +90,7 @@ void client_setup_terminal(void) {
 	}
 }
 
-int client_mainloop(void) {
+int client_mainloop(Server *srv) {
 	sigset_t emptyset, blockset;
 	sigemptyset(&emptyset);
 	sigemptyset(&blockset);
@@ -104,14 +104,14 @@ int client_mainloop(void) {
 		.u.i = client.flags,
 		.len = sizeof(pkt.u.i),
 	};
-	client_send_packet(&pkt);
+	client_send_packet(srv, &pkt);
 
-	while (server.running) {
+	while (srv->running) {
 		fd_set fds;
 		FD_ZERO(&fds);
 		if (!stdin_eof)
 			FD_SET(STDIN_FILENO, &fds);
-		FD_SET(server.socket, &fds);
+		FD_SET(srv->socket, &fds);
 
 		if (client.need_resize) {
 			struct winsize ws;
@@ -121,20 +121,20 @@ int client_mainloop(void) {
 					.u = { .ws = { .rows = ws.ws_row, .cols = ws.ws_col } },
 					.len = sizeof(pkt.u.ws),
 				};
-				if (client_send_packet(&pkt))
+				if (client_send_packet(srv, &pkt))
 					client.need_resize = false;
 			}
 		}
 
-		if (pselect(server.socket+1, &fds, NULL, NULL, NULL, &emptyset) == -1) {
+		if (pselect(srv->socket+1, &fds, NULL, NULL, NULL, &emptyset) == -1) {
 			if (errno == EINTR)
 				continue;
 			die("client-mainloop");
 		}
 
-		if (FD_ISSET(server.socket, &fds)) {
+		if (FD_ISSET(srv->socket, &fds)) {
 			Packet pkt;
-			if (client_recv_packet(&pkt)) {
+			if (client_recv_packet(srv, &pkt)) {
 				switch (pkt.type) {
 				case MSG_CONTENT:
 					if (!passthrough)
@@ -144,8 +144,8 @@ int client_mainloop(void) {
 					client.need_resize = true;
 					break;
 				case MSG_EXIT:
-					client_send_packet(&pkt);
-					close(server.socket);
+					client_send_packet(srv, &pkt);
+					close(srv->socket);
 					return pkt.u.i;
 				}
 			}
@@ -164,16 +164,16 @@ int client_mainloop(void) {
 				} else if (pkt.u.msg[0] == detach_key) {
 					pkt.type = MSG_DETACH;
 					pkt.len = 0;
-					client_send_packet(&pkt);
-					close(server.socket);
+					client_send_packet(srv, &pkt);
+					close(srv->socket);
 					return -1;
 				} else if (!(client.flags & CLIENT_READONLY)) {
-					client_send_packet(&pkt);
+					client_send_packet(srv, &pkt);
 				}
 			} else if (len == 0) {
 				debug("client-stdin: EOF\n");
 				Packet eof_pkt = { .type = MSG_STDIN_EOF, .len = 0 };
-				client_send_packet(&eof_pkt);
+				client_send_packet(srv, &eof_pkt);
 				stdin_eof = true;
 			}
 		}

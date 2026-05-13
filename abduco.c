@@ -218,7 +218,7 @@ static pid_t session_exists(const char *name) {
 	pid_t pid = 0;
 	if ((server.socket = session_connect(name)) == -1)
 		return pid;
-	if (client_recv_packet(&pkt) && pkt.type == MSG_PID)
+	if (client_recv_packet(&server, &pkt) && pkt.type == MSG_PID)
 		pid = pkt.u.l;
 	close(server.socket);
 	return pid;
@@ -505,7 +505,7 @@ static bool attach_session(const char *name, const bool terminate) {
 	sigaction(SIGPIPE, &sa, NULL);
 
 	client_setup_terminal();
-	int status = client_mainloop();
+	int status = client_mainloop(&server);
 	client_restore_terminal();
 	if (status == -1) {
 		info("detached");
