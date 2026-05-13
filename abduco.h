@@ -24,9 +24,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/queue.h>
-#include <sys/socket.h>
 #include <sys/types.h>
-#include <sys/un.h>
 
 #if defined CTRL && defined _AIX
   #undef CTRL
@@ -82,17 +80,6 @@ typedef struct {
 	bool read_pty;
 } Server;
 
-struct Dir {
-	char *path;
-	char *env;
-	bool personal;
-};
-
-bool session_set_socket_name(const Server *srv, const char *name);
-struct sockaddr_un *session_socket_addr(void);
-socklen_t session_socket_len(void);
-const char *session_socket_path(void);
-void session_unlink_socket(void);
 void die(const char *s);
 
 #endif

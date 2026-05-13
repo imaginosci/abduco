@@ -9,6 +9,7 @@
 
 #include "debug.h"
 #include "io.h"
+#include "session.h"
 #include "server.h"
 
 static Server *active_server;
