@@ -11,7 +11,6 @@
 #include "io.h"
 #include "server.h"
 
-static int screen_max_rows = 120;
 static Server *active_server;
 
 #define FD_SET_MAX(fd, set, maxfd) do { \
@@ -88,10 +87,6 @@ int server_set_socket_non_blocking(int sock) {
 	if ((flags = fcntl(sock, F_GETFL, 0)) == -1)
 		flags = 0;
     	return fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-}
-
-void server_set_screen_max_rows(int rows) {
-	screen_max_rows = rows;
 }
 
 void server_set_active(Server *srv) {
@@ -226,7 +221,7 @@ static void server_preserve_screen_data(Server *srv, Packet *pkt) {
 	uint32_t len;
 	struct entry *scrline = NULL;
 
-	if (screen_max_rows == 0 || pkt->len <= 0 || pkt->type != MSG_CONTENT)
+	if (srv->screen_max_rows == 0 || pkt->len <= 0 || pkt->type != MSG_CONTENT)
 		return;
 
 	str = pkt->u.msg;
@@ -281,7 +276,7 @@ static void server_preserve_screen_data(Server *srv, Packet *pkt) {
 			TAILQ_INSERT_HEAD(&srv->screen, scrline, entries);
 			srv->screen_rows++;
 
-			if (srv->screen_rows > screen_max_rows) {
+			if (srv->screen_rows > srv->screen_max_rows) {
 				scrline = TAILQ_LAST(&srv->screen, screenhead);
 				TAILQ_REMOVE(&srv->screen, scrline, entries);
 				free(scrline->data);

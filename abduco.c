@@ -500,7 +500,12 @@ int main(int argc, char *argv[]) {
 	int opt;
 	bool force = false;
 	bool passthrough = false;
-	Server server = { .running = true, .exit_status = -1, .host = "@localhost", .screen_rows = 0 };
+	Server server = {
+		.running = true,
+		.exit_status = -1,
+		.host = "@localhost",
+		.screen_max_rows = 120,
+	};
 	Server *srv = &server;
 	char **cmd = NULL, action = '\0';
 
@@ -551,12 +556,11 @@ int main(int argc, char *argv[]) {
 		case 'L':
 			if (!optarg)
 				 usage();
-			int screen_max_rows = atoi(optarg);
-			if (screen_max_rows < 0) {
+			srv->screen_max_rows = atoi(optarg);
+			if (srv->screen_max_rows < 0) {
 				fputs("ERROR: a negative value for the number of rows is meaningless.\n", stderr);
 				usage();
 			}
-			server_set_screen_max_rows(screen_max_rows);
 			break;
 		case 'v':
 			puts("abduco-"VERSION" © 2013-2018 Marc André Tanner");

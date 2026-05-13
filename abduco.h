@@ -73,6 +73,7 @@ typedef struct {
 	struct winsize winsize;
 	struct screenhead screen;
 	int screen_rows;
+	int screen_max_rows;
 	pid_t pid;
 	volatile sig_atomic_t running;
 	const char *name;

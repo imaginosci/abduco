@@ -7,7 +7,6 @@
 
 int server_create_socket(const char *name);
 int server_set_socket_non_blocking(int sock);
-void server_set_screen_max_rows(int rows);
 void server_set_active(Server *srv);
 void server_pty_died_handler(int sig);
 void server_sigterm_handler(int sig);
