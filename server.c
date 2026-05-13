@@ -59,7 +59,7 @@ static void server_mark_socket_exec(bool exec, bool usr) {
 }
 
 int server_create_socket(const char *name) {
-	if (!session_set_socket_name(name))
+	if (!session_set_socket_name(active_server, name))
 		return -1;
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (fd == -1)

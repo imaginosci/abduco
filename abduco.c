@@ -49,7 +49,7 @@
 # include "forkpty-sunos.c"
 #endif
 
-Server server = { .running = true, .exit_status = -1, .host = "@localhost", .screen_rows = 0 };
+static Server server = { .running = true, .exit_status = -1, .host = "@localhost", .screen_rows = 0 };
 static bool quiet;
 
 static struct sockaddr_un sockaddr = {
@@ -126,11 +126,11 @@ bool recv_packet(int socket, Packet *pkt) {
 	return true;
 }
 
-void info(const char *str, ...) {
+static void info(const Server *srv, const char *str, ...) {
 	va_list ap;
 	va_start(ap, str);
 	if (str && !quiet) {
-		fprintf(stderr, "%s: %s: ", server.name, server.session_name);
+		fprintf(stderr, "%s: %s: ", srv->name, srv->session_name);
 		vfprintf(stderr, str, ap);
 		fprintf(stderr, "\r\n");
 		fflush(stderr);
@@ -199,10 +199,10 @@ static bool xsnprintf(char *buf, size_t size, const char *fmt, ...) {
 	return true;
 }
 
-static int session_connect(const char *name) {
+static int session_connect(const Server *srv, const char *name) {
 	int fd;
 	struct stat sb;
-	if (!session_set_socket_name(name) || (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
+	if (!session_set_socket_name(srv, name) || (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		return -1;
 	if (connect(fd, (struct sockaddr*)session_socket_addr(), session_socket_len()) == -1) {
 		if (errno == ECONNREFUSED && stat(session_socket_path(), &sb) == 0 && S_ISSOCK(sb.st_mode))
@@ -213,25 +213,25 @@ static int session_connect(const char *name) {
 	return fd;
 }
 
-static pid_t session_exists(const char *name) {
+static pid_t session_exists(Server *srv, const char *name) {
 	Packet pkt;
 	pid_t pid = 0;
-	if ((server.socket = session_connect(name)) == -1)
+	if ((srv->socket = session_connect(srv, name)) == -1)
 		return pid;
-	if (client_recv_packet(&server, &pkt) && pkt.type == MSG_PID)
+	if (client_recv_packet(srv, &pkt) && pkt.type == MSG_PID)
 		pid = pkt.u.l;
-	close(server.socket);
+	close(srv->socket);
 	return pid;
 }
 
-static bool session_alive(const char *name) {
+static bool session_alive(Server *srv, const char *name) {
 	struct stat sb;
-	return session_exists(name) &&
+	return session_exists(srv, name) &&
 	       stat(session_socket_path(), &sb) == 0 &&
 	       S_ISSOCK(sb.st_mode) && (sb.st_mode & S_IXGRP) == 0;
 }
 
-static bool create_socket_dir(struct sockaddr_un *sockaddr) {
+static bool create_socket_dir(const Server *srv, struct sockaddr_un *sockaddr) {
 	sockaddr->sun_path[0] = '\0';
 	int socketfd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (socketfd == -1)
@@ -253,7 +253,7 @@ static bool create_socket_dir(struct sockaddr_un *sockaddr) {
 		}
 		if (!dir->path || !dir->path[0])
 			continue;
-		if (!xsnprintf(sockaddr->sun_path, maxlen, "%s/%s%s/", dir->path, ishome ? "." : "", server.name))
+		if (!xsnprintf(sockaddr->sun_path, maxlen, "%s/%s%s/", dir->path, ishome ? "." : "", srv->name))
 			continue;
 		mode_t mask = umask(0);
 		int r = mkdir(sockaddr->sun_path, dir->personal ? S_IRWXU : S_IRWXU|S_IRWXG|S_IRWXO|S_ISVTX);
@@ -306,7 +306,7 @@ static bool create_socket_dir(struct sockaddr_un *sockaddr) {
 	return false;
 }
 
-static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
+static bool set_socket_name(const Server *srv, struct sockaddr_un *sockaddr, const char *name) {
 	const size_t maxlen = sizeof(sockaddr->sun_path);
 	const char *session_name = NULL;
 	char buf[maxlen];
@@ -324,15 +324,15 @@ static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 		if (!xsnprintf(sockaddr->sun_path, maxlen, "%s/%s", cwd, name))
 			return false;
 	} else {
-		if (!create_socket_dir(sockaddr))
+		if (!create_socket_dir(srv, sockaddr))
 			return false;
-		if (strlen(sockaddr->sun_path) + strlen(name) + strlen(server.host) >= maxlen) {
+		if (strlen(sockaddr->sun_path) + strlen(name) + strlen(srv->host) >= maxlen) {
 			errno = ENAMETOOLONG;
 			return false;
 		}
 		session_name = name;
 		strncat(sockaddr->sun_path, name, maxlen - strlen(sockaddr->sun_path) - 1);
-		strncat(sockaddr->sun_path, server.host, maxlen - strlen(sockaddr->sun_path) - 1);
+		strncat(sockaddr->sun_path, srv->host, maxlen - strlen(sockaddr->sun_path) - 1);
 	}
 
 	if (!session_name) {
@@ -345,8 +345,10 @@ static bool set_socket_name(struct sockaddr_un *sockaddr, const char *name) {
 	return true;
 }
 
-bool session_set_socket_name(const char *name) {
-	return set_socket_name(&sockaddr, name);
+bool session_set_socket_name(const Server *srv, const char *name) {
+	if (!srv)
+		return false;
+	return set_socket_name(srv, &sockaddr, name);
 }
 
 struct sockaddr_un *session_socket_addr(void) {
@@ -365,7 +367,7 @@ void session_unlink_socket(void) {
 	unlink(sockaddr.sun_path);
 }
 
-static bool create_session(const char *name, char * const argv[]) {
+static bool create_session(Server *srv, const char *name, char * const argv[]) {
 	/* this uses the well known double fork strategy as described in section 1.7 of
 	 *
 	 *  http://www.faqs.org/faqs/unix-faq/programmer/faq/
@@ -380,14 +382,14 @@ static bool create_session(const char *name, char * const argv[]) {
 	char errormsg[255];
 	struct sigaction sa;
 
-	if (session_exists(name)) {
+	if (session_exists(srv, name)) {
 		errno = EADDRINUSE;
 		return false;
 	}
 
 	if (pipe(client_pipe) == -1)
 		return false;
-	if ((server.socket = server_create_socket(name)) == -1)
+	if ((srv->socket = server_create_socket(name)) == -1)
 		return false;
 
 	switch ((pid = fork())) {
@@ -406,9 +408,9 @@ static bool create_session(const char *name, char * const argv[]) {
 			sigemptyset(&sa.sa_mask);
 			sa.sa_handler = server_pty_died_handler;
 			sigaction(SIGCHLD, &sa, NULL);
-			switch (server.pid = forkpty(&server.pty, NULL, server.term, &server.winsize)) {
+			switch (srv->pid = forkpty(&srv->pty, NULL, srv->term, &srv->winsize)) {
 			case 0: /* child = user application process */
-				close(server.socket);
+				close(srv->socket);
 				close(server_pipe[0]);
 				if (fcntl(client_pipe[1], F_SETFD, FD_CLOEXEC) == 0 &&
 				    fcntl(server_pipe[1], F_SETFD, FD_CLOEXEC) == 0)
@@ -454,7 +456,7 @@ static bool create_session(const char *name, char * const argv[]) {
 				if (read_all(server_pipe[0], errormsg, sizeof(errormsg)) > 0)
 					_exit(EXIT_FAILURE);
 				close(server_pipe[0]);
-				server_mainloop(&server);
+				server_mainloop(srv);
 				break;
 			}
 			break;
@@ -488,12 +490,12 @@ static bool create_session(const char *name, char * const argv[]) {
 	return true;
 }
 
-static bool attach_session(const char *name, const bool terminate) {
-	if (server.socket > 0)
-		close(server.socket);
-	if ((server.socket = session_connect(name)) == -1)
+static bool attach_session(Server *srv, const char *name, const bool terminate) {
+	if (srv->socket > 0)
+		close(srv->socket);
+	if ((srv->socket = session_connect(srv, name)) == -1)
 		return false;
-	if (server_set_socket_non_blocking(server.socket) == -1)
+	if (server_set_socket_non_blocking(srv->socket) == -1)
 		return false;
 
 	struct sigaction sa;
@@ -505,23 +507,19 @@ static bool attach_session(const char *name, const bool terminate) {
 	sigaction(SIGPIPE, &sa, NULL);
 
 	client_setup_terminal();
-	int status = client_mainloop(&server);
+	int status = client_mainloop(srv);
 	client_restore_terminal();
 	if (status == -1) {
-		info("detached");
+		info(srv, "detached");
 	} else if (status == -EIO) {
-		info("exited due to I/O errors");
+		info(srv, "exited due to I/O errors");
 	} else {
-		info("session terminated with exit status %d", status);
+		info(srv, "session terminated with exit status %d", status);
 		if (terminate)
 			exit(status);
 	}
 
 	return terminate;
-}
-
-static int session_filter(const struct dirent *d) {
-	return strstr(d->d_name, server.host) != NULL;
 }
 
 static int session_comparator(const struct dirent **a, const struct dirent **b) {
@@ -533,28 +531,28 @@ static int session_comparator(const struct dirent **a, const struct dirent **b) 
 	return sa.st_atime < sb.st_atime ? -1 : 1;
 }
 
-static int list_session(void) {
-	if (!create_socket_dir(&sockaddr))
+static int list_session(Server *srv) {
+	if (!create_socket_dir(srv, &sockaddr))
 		return 1;
 	if (chdir(session_socket_path()) == -1)
 		die("list-session");
 	struct dirent **namelist;
-	int n = scandir(session_socket_path(), &namelist, session_filter, session_comparator);
+	int n = scandir(session_socket_path(), &namelist, NULL, session_comparator);
 	if (n < 0)
 		return 1;
-	printf("Active sessions (on host %s)\n", server.host+1);
+	printf("Active sessions (on host %s)\n", srv->host+1);
 	while (n--) {
 		struct stat sb; char buf[255];
 		if (stat(namelist[n]->d_name, &sb) == 0 && S_ISSOCK(sb.st_mode)) {
 			pid_t pid = 0;
 			strftime(buf, sizeof(buf), "%a%t %F %T", localtime(&sb.st_mtime));
 			char status = ' ';
-			char *local = strstr(namelist[n]->d_name, server.host);
-			if (local) {
-				*local = '\0'; /* truncate hostname if we are local */
-				if (!(pid = session_exists(namelist[n]->d_name)))
-					continue;
-			}
+			char *local = strstr(namelist[n]->d_name, srv->host);
+			if (!local)
+				continue;
+			*local = '\0'; /* truncate hostname if we are local */
+			if (!(pid = session_exists(srv, namelist[n]->d_name)))
+				continue;
 			if (sb.st_mode & S_IXUSR)
 				status = '*';
 			else if (sb.st_mode & S_IXGRP)
@@ -571,6 +569,7 @@ int main(int argc, char *argv[]) {
 	int opt;
 	bool force = false;
 	bool passthrough = false;
+	Server *srv = &server;
 	char **cmd = NULL, action = '\0';
 
 	char *default_cmd[4] = { "/bin/sh", "-c", getenv("ABDUCO_CMD"), NULL };
@@ -579,9 +578,9 @@ int main(int argc, char *argv[]) {
 		default_cmd[1] = NULL;
 	}
 
-	server.name = basename(argv[0]);
-	gethostname(server.host+1, sizeof(server.host) - 1);
-	server_set_active(&server);
+	srv->name = basename(argv[0]);
+	gethostname(srv->host+1, sizeof(srv->host) - 1);
+	server_set_active(srv);
 
 	while ((opt = getopt(argc, argv, "aAcdlne:fhpqrvL:")) != -1) {
 		switch (opt) {
@@ -637,7 +636,7 @@ int main(int argc, char *argv[]) {
 
 	/* collect the session name if trailing args */
 	if (optind < argc)
-		server.session_name = argv[optind];
+		srv->session_name = argv[optind];
 
 	/* if yet more trailing arguments, they must be the command */
 	if (optind + 1 < argc)
@@ -645,7 +644,7 @@ int main(int argc, char *argv[]) {
 	else
 		cmd = default_cmd;
 
-	if (server.session_name && !isatty(STDIN_FILENO))
+	if (srv->session_name && !isatty(STDIN_FILENO))
 		passthrough = true;
 
 	if (passthrough) {
@@ -657,54 +656,54 @@ int main(int argc, char *argv[]) {
 	client_set_passthrough(passthrough);
 	client_set_keys(KEY_DETACH, KEY_REDRAW);
 
-	if (!action && !server.session_name)
-		exit(list_session());
-	if (!action || !server.session_name)
+	if (!action && !srv->session_name)
+		exit(list_session(srv));
+	if (!action || !srv->session_name)
 		usage();
 
 	if (!passthrough)
-		server.term = client_capture_terminal();
+		srv->term = client_capture_terminal();
 
-	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &server.winsize) == -1) {
-		server.winsize.ws_col = 80;
-		server.winsize.ws_row = 25;
+	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &srv->winsize) == -1) {
+		srv->winsize.ws_col = 80;
+		srv->winsize.ws_row = 25;
 	}
 
-	server.read_pty = (action == 'n');
+	srv->read_pty = (action == 'n');
 
 	redo:
 	switch (action) {
 	case 'n':
 	case 'c':
 		if (force) {
-			if (session_alive(server.session_name)) {
-				info("session exists and has not yet terminated");
+			if (session_alive(srv, srv->session_name)) {
+				info(srv, "session exists and has not yet terminated");
 				return 1;
 			}
-			if (session_exists(server.session_name))
-				attach_session(server.session_name, false);
+			if (session_exists(srv, srv->session_name))
+				attach_session(srv, srv->session_name, false);
 		}
-		if (!create_session(server.session_name, cmd))
+		if (!create_session(srv, srv->session_name, cmd))
 			die("create-session");
 		if (action == 'n')
 			break;
 		/* fall through */
 	case 'a':
-		if (!attach_session(server.session_name, true))
+		if (!attach_session(srv, srv->session_name, true))
 			die("attach-session");
 		break;
 	case 'A':
-		if (session_alive(server.session_name)) {
-			if (!attach_session(server.session_name, true))
+		if (session_alive(srv, srv->session_name)) {
+			if (!attach_session(srv, srv->session_name, true))
 				die("attach-session");
-		} else if (!attach_session(server.session_name, !force)) {
+		} else if (!attach_session(srv, srv->session_name, !force)) {
 			force = false;
 			action = 'c';
 			goto redo;
 		}
 		break;
     case 'd':
-        if (session_exists(server.session_name)) {
+        if (session_exists(srv, srv->session_name)) {
             return EXIT_SUCCESS;
         } else {
             return EXIT_FAILURE;
