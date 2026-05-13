@@ -66,7 +66,7 @@ int server_create_socket(const char *name) {
 	if (fd == -1)
 		return -1;
 	mode_t mask = umask(S_IXUSR|S_IRWXG|S_IRWXO);
-	int r = bind(fd, (struct sockaddr*)session_socket_addr(), session_socket_len());
+	int r = session_socket_bind(fd);
 	umask(mask);
 
 	if (r == -1) {

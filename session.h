@@ -9,8 +9,8 @@
 
 bool session_set_socket_name(const Server *srv, const char *name);
 bool session_set_socket_dir(const Server *srv);
-struct sockaddr_un *session_socket_addr(void);
-socklen_t session_socket_len(void);
+int session_socket_bind(int fd);
+int session_socket_connect(int fd);
 const char *session_socket_path(void);
 void session_unlink_socket(void);
 

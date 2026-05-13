@@ -171,12 +171,14 @@ bool session_set_socket_dir(const Server *srv) {
 	return create_socket_dir(srv, &sockaddr);
 }
 
-struct sockaddr_un *session_socket_addr(void) {
-	return &sockaddr;
+int session_socket_bind(int fd) {
+	socklen_t len = offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1;
+	return bind(fd, (struct sockaddr*)&sockaddr, len);
 }
 
-socklen_t session_socket_len(void) {
-	return offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1;
+int session_socket_connect(int fd) {
+	socklen_t len = offsetof(struct sockaddr_un, sun_path) + strlen(sockaddr.sun_path) + 1;
+	return connect(fd, (struct sockaddr*)&sockaddr, len);
 }
 
 const char *session_socket_path(void) {

@@ -115,7 +115,7 @@ static int session_connect(const Server *srv, const char *name) {
 	struct stat sb;
 	if (!session_set_socket_name(srv, name) || (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		return -1;
-	if (connect(fd, (struct sockaddr*)session_socket_addr(), session_socket_len()) == -1) {
+	if (session_socket_connect(fd) == -1) {
 		if (errno == ECONNREFUSED && stat(session_socket_path(), &sb) == 0 && S_ISSOCK(sb.st_mode))
 			session_unlink_socket();
 		close(fd);
