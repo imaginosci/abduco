@@ -11,6 +11,7 @@
 #include "server.h"
 
 static int screen_max_rows = 120;
+static Server *active_server;
 
 #define FD_SET_MAX(fd, set, maxfd) do { \
 		FD_SET(fd, set);        \
@@ -32,12 +33,12 @@ static void client_free(Client *c) {
 	free(c);
 }
 
-static void server_sink_client(void) {
-	if (!server.clients || !server.clients->next)
+static void server_sink_client(Server *srv) {
+	if (!srv->clients || !srv->clients->next)
 		return;
-	Client *target = server.clients;
-	server.clients = target->next;
-	Client *dst = server.clients;
+	Client *target = srv->clients;
+	srv->clients = target->next;
+	Client *dst = srv->clients;
 	while (dst->next)
 		dst = dst->next;
 	target->next = NULL;
@@ -92,27 +93,31 @@ void server_set_screen_max_rows(int rows) {
 	screen_max_rows = rows;
 }
 
-static bool server_read_pty(Packet *pkt) {
+void server_set_active(Server *srv) {
+	active_server = srv;
+}
+
+static bool server_read_pty(Server *srv, Packet *pkt) {
 	pkt->type = MSG_CONTENT;
-	ssize_t len = read(server.pty, pkt->u.msg, sizeof(pkt->u.msg));
+	ssize_t len = read(srv->pty, pkt->u.msg, sizeof(pkt->u.msg));
 	if (len > 0)
 		pkt->len = len;
 	else if (len == 0)
-		server.running = false;
+		srv->running = false;
 	else if (len == -1 && errno != EAGAIN && errno != EINTR && errno != EWOULDBLOCK)
-		server.running = false;
+		srv->running = false;
 	print_packet("server-read-pty:", pkt);
 	return len > 0;
 }
 
-static bool server_write_pty(Packet *pkt) {
+static bool server_write_pty(Server *srv, Packet *pkt) {
 	print_packet("server-write-pty:", pkt);
 	size_t size = pkt->len;
-	ssize_t written = write_all(server.pty, pkt->u.msg, size);
+	ssize_t written = write_all(srv->pty, pkt->u.msg, size);
 	if (written >= 0 && (size_t)written == size)
 		return true;
 	debug("FAILED\n");
-	server.running = false;
+	srv->running = false;
 	return false;
 }
 
@@ -137,17 +142,21 @@ static bool server_send_packet(Client *c, Packet *pkt) {
 
 void server_pty_died_handler(int sig) {
 	(void)sig;
+	Server *srv = active_server;
 	int errsv = errno;
 	pid_t pid;
 
-	while ((pid = waitpid(-1, &server.exit_status, WNOHANG)) != 0) {
+	if (!srv)
+		return;
+
+	while ((pid = waitpid(-1, &srv->exit_status, WNOHANG)) != 0) {
 		if (pid == -1)
 			break;
-		server.exit_status = WEXITSTATUS(server.exit_status);
+		srv->exit_status = WEXITSTATUS(srv->exit_status);
 		server_mark_socket_exec(true, false);
 	}
 
-	debug("server pty died: %d\n", server.exit_status);
+	debug("server pty died: %d\n", srv->exit_status);
 	errno = errsv;
 }
 
@@ -156,20 +165,20 @@ void server_sigterm_handler(int sig) {
 	exit(EXIT_FAILURE); /* invoke atexit handler */
 }
 
-static Client *server_accept_client(void) {
-	int newfd = accept(server.socket, NULL, NULL);
+static Client *server_accept_client(Server *srv) {
+	int newfd = accept(srv->socket, NULL, NULL);
 	if (newfd == -1 || server_set_socket_non_blocking(newfd) == -1)
 		goto error;
 	Client *c = client_malloc(newfd);
 	if (!c)
 		goto error;
-	if (!server.clients)
+	if (!srv->clients)
 		server_mark_socket_exec(true, true);
 	c->socket = newfd;
 	c->state = STATE_CONNECTED;
-	c->next = server.clients;
-	server.clients = c;
-	server.read_pty = true;
+	c->next = srv->clients;
+	srv->clients = c;
+	srv->read_pty = true;
 
 	Packet pkt = {
 		.type = MSG_PID,
@@ -187,18 +196,21 @@ error:
 
 void server_sigusr1_handler(int sig) {
 	(void)sig;
-	int socket = server_create_socket(server.session_name);
+	Server *srv = active_server;
+	if (!srv)
+		return;
+	int socket = server_create_socket(srv->session_name);
 	if (socket != -1) {
-		if (server.socket)
-			close(server.socket);
-		server.socket = socket;
+		if (srv->socket)
+			close(srv->socket);
+		srv->socket = socket;
 	}
 }
 
-static void server_send_screen_buffer(Client *c) {
+static void server_send_screen_buffer(Server *srv, Client *c) {
 	struct entry *np;
 
-	TAILQ_FOREACH_REVERSE(np, &server.screen, screenhead, entries) {
+	TAILQ_FOREACH_REVERSE(np, &srv->screen, screenhead, entries) {
 		Packet pkt = {
 			.type = MSG_CONTENT,
 			.len = np->len,
@@ -208,7 +220,7 @@ static void server_send_screen_buffer(Client *c) {
 	}
 }
 
-static void server_preserve_screen_data(Packet *pkt) {
+static void server_preserve_screen_data(Server *srv, Packet *pkt) {
 	char *str, *end;
 	uint32_t len;
 	struct entry *scrline = NULL;
@@ -238,7 +250,7 @@ static void server_preserve_screen_data(Packet *pkt) {
 		if ((dlen = token - str) <= 0)
 			break;
 
-		scrline = TAILQ_FIRST(&server.screen);
+		scrline = TAILQ_FIRST(&srv->screen);
 
 		if (scrline && !scrline->complete) {
 			data = realloc(scrline->data, scrline->len + dlen);
@@ -265,15 +277,15 @@ static void server_preserve_screen_data(Packet *pkt) {
 			scrline->data = data;
 			scrline->len = dlen;
 
-			TAILQ_INSERT_HEAD(&server.screen, scrline, entries);
-			server.screen_rows++;
+			TAILQ_INSERT_HEAD(&srv->screen, scrline, entries);
+			srv->screen_rows++;
 
-			if (server.screen_rows > screen_max_rows) {
-				scrline = TAILQ_LAST(&server.screen, screenhead);
-				TAILQ_REMOVE(&server.screen, scrline, entries);
+			if (srv->screen_rows > screen_max_rows) {
+				scrline = TAILQ_LAST(&srv->screen, screenhead);
+				TAILQ_REMOVE(&srv->screen, scrline, entries);
 				free(scrline->data);
 				free(scrline);
-				server.screen_rows--;
+				srv->screen_rows--;
 			}
 		}
 
@@ -282,25 +294,26 @@ static void server_preserve_screen_data(Packet *pkt) {
 	}
 }
 
-void server_mainloop(void) {
+void server_mainloop(Server *srv) {
+	server_set_active(srv);
 	atexit(session_unlink_socket);
 	fd_set new_readfds, new_writefds;
 	FD_ZERO(&new_readfds);
 	FD_ZERO(&new_writefds);
-	FD_SET(server.socket, &new_readfds);
-	int new_fdmax = server.socket;
+	FD_SET(srv->socket, &new_readfds);
+	int new_fdmax = srv->socket;
 	bool exit_packet_delivered = false;
 
-	TAILQ_INIT(&server.screen);
+	TAILQ_INIT(&srv->screen);
 
-	if (server.read_pty)
-		FD_SET_MAX(server.pty, &new_readfds, new_fdmax);
+	if (srv->read_pty)
+		FD_SET_MAX(srv->pty, &new_readfds, new_fdmax);
 
-	while (server.clients || !exit_packet_delivered) {
+	while (srv->clients || !exit_packet_delivered) {
 		int fdmax = new_fdmax;
 		fd_set readfds = new_readfds;
 		fd_set writefds = new_writefds;
-		FD_SET_MAX(server.socket, &readfds, fdmax);
+		FD_SET_MAX(srv->socket, &readfds, fdmax);
 
 		if (select(fdmax+1, &readfds, &writefds, NULL, NULL) == -1) {
 			if (errno == EINTR)
@@ -310,55 +323,55 @@ void server_mainloop(void) {
 
 		FD_ZERO(&new_readfds);
 		FD_ZERO(&new_writefds);
-		new_fdmax = server.socket;
+		new_fdmax = srv->socket;
 
 		bool pty_data = false;
 
 		Packet server_packet, client_packet;
 
-		if (FD_ISSET(server.socket, &readfds))
-			server_accept_client();
+		if (FD_ISSET(srv->socket, &readfds))
+			server_accept_client(srv);
 
-		if (FD_ISSET(server.pty, &readfds)) {
-			pty_data = server_read_pty(&server_packet);
+		if (FD_ISSET(srv->pty, &readfds)) {
+			pty_data = server_read_pty(srv, &server_packet);
 			if (pty_data)
-				server_preserve_screen_data(&server_packet);
+				server_preserve_screen_data(srv, &server_packet);
 		}
 
-		for (Client **prev_next = &server.clients, *c = server.clients; c;) {
+		for (Client **prev_next = &srv->clients, *c = srv->clients; c;) {
 			if (FD_ISSET(c->socket, &readfds) && server_recv_packet(c, &client_packet)) {
 				switch (client_packet.type) {
 				case MSG_CONTENT:
-					server_write_pty(&client_packet);
+					server_write_pty(srv, &client_packet);
 					break;
 				case MSG_ATTACH:
 					c->flags = client_packet.u.i;
 					if (c->flags & CLIENT_LOWPRIORITY)
-						server_sink_client();
-					server_send_screen_buffer(c);
+						server_sink_client(srv);
+					server_send_screen_buffer(srv, c);
 					break;
 				case MSG_RESIZE: {
 						pid_t group_id;
 
 						c->state = STATE_ATTACHED;
-						if (!(c->flags & CLIENT_READONLY) && c == server.clients) {
+						if (!(c->flags & CLIENT_READONLY) && c == srv->clients) {
 							debug("server-ioct: TIOCSWINSZ\n");
 							struct winsize ws = { 0 };
 							ws.ws_row = client_packet.u.ws.rows;
 							ws.ws_col = client_packet.u.ws.cols;
-							ioctl(server.pty, TIOCSWINSZ, &ws);
+							ioctl(srv->pty, TIOCSWINSZ, &ws);
 						}
 
-						group_id = tcgetpgrp(server.pty);
+						group_id = tcgetpgrp(srv->pty);
 						kill(-group_id, SIGWINCH);
 						break;
 					}
 				case MSG_STDIN_EOF: {
 					/* Forward EOF to pty - application sees EOF on stdin */
 					struct termios t;
-					if (tcgetattr(server.pty, &t) == 0) {
+					if (tcgetattr(srv->pty, &t) == 0) {
 						char eof_char = t.c_cc[VEOF];
-						if (write(server.pty, &eof_char, 1) < 0)
+						if (write(srv->pty, &eof_char, 1) < 0)
 							debug("MSG_STDIN_EOF write failed\n");
 					}
 					break;
@@ -375,19 +388,19 @@ void server_mainloop(void) {
 			}
 
 			if (c->state == STATE_DISCONNECTED) {
-				bool first = (c == server.clients);
+				bool first = (c == srv->clients);
 				Client *t = c->next;
 				if (c->msg_exit_sent)
 					exit_packet_delivered = true;
 				client_free(c);
 				*prev_next = c = t;
-				if (first && server.clients) {
+				if (first && srv->clients) {
 					Packet pkt = {
 						.type = MSG_RESIZE,
 						.len = 0,
 					};
-					server_send_packet(server.clients, &pkt);
-				} else if (!server.clients) {
+					server_send_packet(srv->clients, &pkt);
+				} else if (!srv->clients) {
 					server_mark_socket_exec(false, true);
 				}
 				continue;
@@ -397,11 +410,11 @@ void server_mainloop(void) {
 
 			if (pty_data)
 				server_send_packet(c, &server_packet);
-			if (!server.running) {
-				if (server.exit_status != -1) {
+			if (!srv->running) {
+				if (srv->exit_status != -1) {
 					Packet pkt = {
 						.type = MSG_EXIT,
-						.u.i = server.exit_status,
+						.u.i = srv->exit_status,
 						.len = sizeof(pkt.u.i),
 					};
 					if (server_send_packet(c, &pkt))
@@ -416,13 +429,13 @@ void server_mainloop(void) {
 			c = c->next;
 		}
 
-		if (server.running && server.read_pty)
-			FD_SET_MAX(server.pty, &new_readfds, new_fdmax);
+		if (srv->running && srv->read_pty)
+			FD_SET_MAX(srv->pty, &new_readfds, new_fdmax);
 	}
 
 	struct entry *n1, *n2;
 
-	n1 = TAILQ_FIRST(&server.screen);
+	n1 = TAILQ_FIRST(&srv->screen);
 	while (n1 != NULL) {
 		n2 = TAILQ_NEXT(n1, entries);
 		free(n1->data);

@@ -454,7 +454,7 @@ static bool create_session(const char *name, char * const argv[]) {
 				if (read_all(server_pipe[0], errormsg, sizeof(errormsg)) > 0)
 					_exit(EXIT_FAILURE);
 				close(server_pipe[0]);
-				server_mainloop();
+				server_mainloop(&server);
 				break;
 			}
 			break;
@@ -581,6 +581,7 @@ int main(int argc, char *argv[]) {
 
 	server.name = basename(argv[0]);
 	gethostname(server.host+1, sizeof(server.host) - 1);
+	server_set_active(&server);
 
 	while ((opt = getopt(argc, argv, "aAcdlne:fhpqrvL:")) != -1) {
 		switch (opt) {
