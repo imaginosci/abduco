@@ -49,7 +49,6 @@
 # include "forkpty-sunos.c"
 #endif
 
-static Server server = { .running = true, .exit_status = -1, .host = "@localhost", .screen_rows = 0 };
 static bool quiet;
 
 static struct sockaddr_un sockaddr = {
@@ -569,6 +568,7 @@ int main(int argc, char *argv[]) {
 	int opt;
 	bool force = false;
 	bool passthrough = false;
+	Server server = { .running = true, .exit_status = -1, .host = "@localhost", .screen_rows = 0 };
 	Server *srv = &server;
 	char **cmd = NULL, action = '\0';
 
