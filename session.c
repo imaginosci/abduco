@@ -21,12 +21,17 @@ struct Dir {
 	bool personal;
 };
 
-#define ABDUCO_CONFIG_NO_KEYS
-#include "config.h"
 #include "session.h"
 
 static struct sockaddr_un sockaddr = {
 	.sun_family = AF_UNIX,
+};
+
+static struct Dir socket_dirs[] = {
+	{ .env  = "ABDUCO_SOCKET_DIR", false },
+	{ .env  = "HOME",              true  },
+	{ .env  = "TMPDIR",            false },
+	{ .path = "/tmp",              false },
 };
 
 static bool xsnprintf(char *buf, size_t size, const char *fmt, ...) {

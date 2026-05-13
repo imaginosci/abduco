@@ -37,7 +37,6 @@
 
 #include "abduco.h"
 #include "client.h"
-#define ABDUCO_CONFIG_NO_SOCKET_DIRS
 #include "config.h"
 #include "debug.h"
 #include "io.h"
