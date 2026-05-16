@@ -95,6 +95,29 @@ return 1
 fi
 }
 
+tryforkpty () {
+printf "checking for forkpty%s... " "$1"
+cat > "$tmpc" <<EOF
+#include <sys/types.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+
+pid_t forkpty(int *, char *, struct termios *, struct winsize *);
+
+int main(void) {
+	int master;
+	return forkpty(&master, 0, 0, 0) == -1;
+}
+EOF
+if $CC $CPPFLAGS $CFLAGS_STD $CFLAGS $LDFLAGS -o "$tmpo" "$tmpc" $2 >/dev/null 2>&1 ; then
+printf "yes\n"
+return 0
+else
+printf "no\n"
+return 1
+fi
+}
+
 # Beginning of actual script
 
 CFLAGS_AUTO=
@@ -186,7 +209,7 @@ tryldflag LDFLAGS_TRY -Werror=unknown-warning-option
 tryldflag LDFLAGS_TRY -Werror=unused-command-line-argument
 
 CFLAGS_STD="-std=c99 -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -DNDEBUG -D_FORTIFY_SOURCE=2"
-LDFLAGS_STD="-lc -lutil"
+LDFLAGS_STD="-lc"
 
 OS=$(uname)
 
@@ -195,6 +218,19 @@ FreeBSD) CFLAGS_STD="$CFLAGS_STD -D_BSD_SOURCE -D__BSD_VISIBLE=1" ;;
 *BSD)    CFLAGS_STD="$CFLAGS_STD -D_BSD_SOURCE" ;;
 Darwin)  CFLAGS_STD="$CFLAGS_STD -D_DARWIN_C_SOURCE" ;;
 AIX)     CFLAGS_STD="$CFLAGS_STD -D_ALL_SOURCE" ;;
+esac
+
+case "$OS" in
+AIX|SunOS) ;;
+*)
+	if tryforkpty "" ""; then
+		:
+	elif tryforkpty " in -lutil" "-lutil"; then
+		LDFLAGS_STD="$LDFLAGS_STD -lutil"
+	else
+		fail "$0: cannot find forkpty"
+	fi
+	;;
 esac
 
 tryflag CFLAGS -pipe
