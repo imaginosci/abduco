@@ -27,11 +27,11 @@
 #include <sys/select.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#if defined(__linux__) || defined(__CYGWIN__)
+#if defined(HAVE_PTY_H)
 # include <pty.h>
-#elif defined(__FreeBSD__) || defined(__DragonFly__)
+#elif defined(HAVE_LIBUTIL_H)
 # include <libutil.h>
-#elif defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
+#elif defined(HAVE_UTIL_H)
 # include <util.h>
 #endif
 
