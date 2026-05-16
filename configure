@@ -126,9 +126,7 @@ cat > "$tmpc" <<EOF
 
 int main(void) {
 	int master;
-	pid_t (*fn)(int *, char *, const struct termios *,
-	            const struct winsize *) = forkpty;
-	return fn(&master, 0, 0, 0) == -1;
+	return forkpty(&master, 0, 0, 0) == -1;
 }
 EOF
 if $CC $CPPFLAGS $CFLAGS_STD $CFLAGS $LDFLAGS -o "$tmpo" "$tmpc" $2 >/dev/null 2>&1 ; then
@@ -246,18 +244,16 @@ tryheader CFLAGS_STD pty.h PTY_H
 tryheader CFLAGS_STD util.h UTIL_H
 tryheader CFLAGS_STD libutil.h LIBUTIL_H
 
-case "$OS" in
-AIX|SunOS) ;;
-*)
-	if tryforkpty "" ""; then
-		:
-	elif tryforkpty " in -lutil" "-lutil"; then
-		LDFLAGS_STD="$LDFLAGS_STD -lutil"
-	else
-		fail "$0: cannot find forkpty"
-	fi
-	;;
-esac
+if tryforkpty "" ""; then
+	:
+elif tryforkpty " in -lutil" "-lutil"; then
+	LDFLAGS_STD="$LDFLAGS_STD -lutil"
+else
+	case "$OS" in
+	AIX|SunOS) echo "using local forkpty fallback" ;;
+	*)         fail "$0: cannot find forkpty" ;;
+	esac
+fi
 
 tryflag CFLAGS -pipe
 
