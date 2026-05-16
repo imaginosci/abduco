@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2009 Nicholas Marriott <nicm@users.sourceforge.net>
  * Copyright (c) 2012 Ross Palmer Mohn <rpmohn@waxandwane.org>
@@ -19,9 +20,12 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stropts.h>
 #include <unistd.h>
 #include <paths.h>
+
+#include "abduco.h"
 
 pid_t forkpty(int *master, char *name, struct termios *tio, struct winsize *ws)
 {

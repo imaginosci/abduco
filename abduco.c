@@ -44,12 +44,6 @@
 #include "session.h"
 #include "server.h"
 
-#if defined(_AIX)
-# include "forkpty-aix.c"
-#elif defined(__sun)
-# include "forkpty-sunos.c"
-#endif
-
 static bool quiet;
 
 static void info(const Server *srv, const char *str, ...) {

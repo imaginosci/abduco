@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2008 Nicholas Marriott <nicm@users.sourceforge.net>
  *
@@ -21,6 +22,8 @@
 #include <strings.h>
 #include <stropts.h>
 #include <unistd.h>
+
+#include "abduco.h"
 
 #ifndef TTY_NAME_MAX
 #define TTY_NAME_MAX TTYNAME_MAX

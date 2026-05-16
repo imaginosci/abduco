@@ -21,8 +21,17 @@ GENHTML ?= genhtml
 PREFIX ?= /usr/local
 SHAREDIR ?= ${PREFIX}/share
 TEST_RUNNER ?= ./tests/run.sh
+UNAME_S := $(shell uname)
 
 SRC = abduco.c client.c server.c debug.c io.c packet.c session.c
+
+ifeq (${UNAME_S},AIX)
+SRC += forkpty-aix.c
+endif
+ifeq (${UNAME_S},SunOS)
+SRC += forkpty-sunos.c
+endif
+
 OBJ = ${SRC:.c=.o}
 
 all: abduco

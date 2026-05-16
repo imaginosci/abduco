@@ -80,6 +80,11 @@ typedef struct {
 	bool read_pty;
 } Server;
 
+#if defined(_AIX) || defined(__sun)
+pid_t forkpty(int *master, char *name, struct termios *tio,
+              struct winsize *ws);
+#endif
+
 void die(const char *s);
 
 #endif
