@@ -24,7 +24,7 @@ TEST_RUNNER ?= ./tests/run.sh
 UNAME_S := $(shell uname)
 
 SRC = abduco.c client.c server.c debug.c io.c packet.c session.c
-UNIT_TESTS = tests/unit/packet_test
+UNIT_TESTS = tests/unit/io_test tests/unit/packet_test
 
 ifeq (${UNAME_S},AIX)
 SRC += forkpty-aix.c
@@ -63,6 +63,11 @@ test-unit: ${UNIT_TESTS}
 tests/unit/packet_test: tests/unit/packet_test.c packet.c io.c debug.c packet.h io.h debug.h abduco.h
 	${CC} ${CFLAGS} ${CFLAGS_STD} ${CFLAGS_AUTO} ${CFLAGS_EXTRA} -I. \
 		tests/unit/packet_test.c packet.c io.c debug.c \
+		${LDFLAGS} ${LDFLAGS_STD} ${LDFLAGS_AUTO} ${LDFLAGS_EXTRA} -o $@
+
+tests/unit/io_test: tests/unit/io_test.c io.c debug.c io.h debug.h abduco.h
+	${CC} ${CFLAGS} ${CFLAGS_STD} ${CFLAGS_AUTO} ${CFLAGS_EXTRA} -I. \
+		tests/unit/io_test.c io.c debug.c \
 		${LDFLAGS} ${LDFLAGS_STD} ${LDFLAGS_AUTO} ${LDFLAGS_EXTRA} -o $@
 
 coverage-gcov: clean
