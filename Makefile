@@ -24,6 +24,7 @@ TEST_RUNNER ?= ./tests/run.sh
 UNAME_S := $(shell uname)
 
 SRC = abduco.c client.c server.c debug.c io.c packet.c session.c
+UNIT_TESTS = tests/unit/packet_test
 
 ifeq (${UNAME_S},AIX)
 SRC += forkpty-aix.c
@@ -53,8 +54,16 @@ ${OBJ}: config.h config.mk abduco.h client.h server.h debug.h io.h packet.h sess
 debug: clean
 	${MAKE} CFLAGS_EXTRA='${CFLAGS_DEBUG}'
 
-test: clean abduco
+test: clean test-unit abduco
 	${TEST_RUNNER}
+
+test-unit: ${UNIT_TESTS}
+	@for test in ${UNIT_TESTS}; do ./$$test || exit 1; done
+
+tests/unit/packet_test: tests/unit/packet_test.c packet.c io.c debug.c packet.h io.h debug.h abduco.h
+	${CC} ${CFLAGS} ${CFLAGS_STD} ${CFLAGS_AUTO} ${CFLAGS_EXTRA} -I. \
+		tests/unit/packet_test.c packet.c io.c debug.c \
+		${LDFLAGS} ${LDFLAGS_STD} ${LDFLAGS_AUTO} ${LDFLAGS_EXTRA} -o $@
 
 coverage-gcov: clean
 	${MAKE} CFLAGS_EXTRA='-O0 -g --coverage' LDFLAGS_EXTRA='--coverage' abduco
@@ -69,7 +78,7 @@ coverage: coverage-html
 
 clean:
 	@echo cleaning
-	@rm -f abduco abduco-*.tar.gz coverage.info typescript *.o
+	@rm -f abduco ${UNIT_TESTS} abduco-*.tar.gz coverage.info typescript *.o
 	@rm -f *.gcda *.gcno *.gcov
 	@rm -rf coverage
 
@@ -104,4 +113,4 @@ uninstall:
 	@echo removing zsh completion file from ${DESTDIR}${SHAREDIR}/zsh/site-functions
 	@rm -f ${DESTDIR}${SHAREDIR}/zsh/site-functions/_abduco
 
-.PHONY: all clean dist install installdirs install-strip install-completion uninstall debug test coverage coverage-gcov coverage-html
+.PHONY: all clean dist install installdirs install-strip install-completion uninstall debug test test-unit coverage coverage-gcov coverage-html
