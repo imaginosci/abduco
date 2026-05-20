@@ -432,9 +432,6 @@ void server_mainloop(Server *srv) {
 						} else if (kill(-group_id, SIGWINCH) == -1) {
 							debug_errno("server-resize: SIGWINCH failed pty=%d pgrp=%d",
 							            srv->pty, group_id);
-						} else {
-							debug("server-resize: SIGWINCH sent pgrp=%d\n",
-							      group_id);
 						}
 						break;
 					}

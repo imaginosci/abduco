@@ -169,9 +169,6 @@ int client_mainloop(Server *srv) {
 			if (len == -1 && errno != EAGAIN && errno != EINTR)
 				die("client-stdin");
 			if (len > 0) {
-				debug("client-stdin: read len=%zd first=0x%02x readonly=%d\n",
-				      len, (unsigned char)pkt.u.msg[0],
-				      !!(client.flags & CLIENT_READONLY));
 				pkt.len = len;
 				if (redraw_key && pkt.u.msg[0] == redraw_key) {
 					debug("client-stdin: redraw key received\n");
