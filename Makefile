@@ -5,6 +5,7 @@ VERSION = 0.7
 CFLAGS_STD ?= -std=c99 -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -DNDEBUG
 CFLAGS_STD += -DVERSION=\"${VERSION}\"
 STRICT_CFLAGS = -Wall -Wextra -Wmissing-prototypes -Wstrict-prototypes
+CFLAGS_DEBUG ?= -U_FORTIFY_SOURCE -UNDEBUG -O0 -g -ggdb -Wall -Wextra -pedantic -Wno-unused-parameter -Wno-sign-compare -DDEBUG_FD=9
 
 ifdef STRICT
 CFLAGS_EXTRA += ${STRICT_CFLAGS}
@@ -23,7 +24,7 @@ SHAREDIR ?= ${PREFIX}/share
 TEST_RUNNER ?= ./tests/run.sh
 UNAME_S := $(shell uname)
 
-SRC = abduco.c client.c server.c debug.c io.c packet.c session.c
+SRC = abduco.c client.c server.c io.c packet.c session.c
 UNIT_TESTS = tests/unit/io_test tests/unit/packet_test
 
 ifeq (${UNAME_S},AIX)
@@ -60,14 +61,14 @@ test: clean test-unit abduco
 test-unit: ${UNIT_TESTS}
 	@for test in ${UNIT_TESTS}; do ./$$test || exit 1; done
 
-tests/unit/packet_test: tests/unit/packet_test.c packet.c io.c debug.c packet.h io.h debug.h abduco.h
+tests/unit/packet_test: tests/unit/packet_test.c packet.c io.c packet.h io.h
 	${CC} ${CFLAGS} ${CFLAGS_STD} ${CFLAGS_AUTO} ${CFLAGS_EXTRA} -I. \
-		tests/unit/packet_test.c packet.c io.c debug.c \
+		tests/unit/packet_test.c packet.c io.c \
 		${LDFLAGS} ${LDFLAGS_STD} ${LDFLAGS_AUTO} ${LDFLAGS_EXTRA} -o $@
 
-tests/unit/io_test: tests/unit/io_test.c io.c debug.c io.h debug.h abduco.h
+tests/unit/io_test: tests/unit/io_test.c io.c io.h
 	${CC} ${CFLAGS} ${CFLAGS_STD} ${CFLAGS_AUTO} ${CFLAGS_EXTRA} -I. \
-		tests/unit/io_test.c io.c debug.c \
+		tests/unit/io_test.c io.c \
 		${LDFLAGS} ${LDFLAGS_STD} ${LDFLAGS_AUTO} ${LDFLAGS_EXTRA} -o $@
 
 coverage-gcov: clean

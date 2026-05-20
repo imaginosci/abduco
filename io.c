@@ -3,11 +3,9 @@
 #include <stddef.h>
 #include <unistd.h>
 
-#include "debug.h"
 #include "io.h"
 
 ssize_t write_all(int fd, const char *buf, size_t len) {
-	debug("write_all(%d)\n", len);
 	ssize_t ret = len;
 	while (len > 0) {
 		ssize_t res = write(fd, buf, len);
@@ -25,7 +23,6 @@ ssize_t write_all(int fd, const char *buf, size_t len) {
 }
 
 ssize_t read_all(int fd, char *buf, size_t len) {
-	debug("read_all(%d)\n", len);
 	ssize_t ret = len;
 	while (len > 0) {
 		ssize_t res = read(fd, buf, len);
