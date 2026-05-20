@@ -38,7 +38,6 @@
 #include "abduco.h"
 #include "client.h"
 #include "config.h"
-#include "debug.h"
 #include "io.h"
 #include "packet.h"
 #include "session.h"
