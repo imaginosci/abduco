@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/select.h>
 
 #include "client.h"
@@ -23,8 +24,9 @@ static bool client_send_packet(Server *srv, Packet *pkt) {
 	print_packet("client-send:", pkt);
 	if (send_packet(srv->socket, pkt))
 		return true;
-	debug("client-send: failed socket=%d type=%"PRIu32" len=%"PRIu32" errno=%d\n",
-	      srv->socket, pkt->type, pkt->len, errno);
+	int err = errno;
+	debug("client-send: failed socket=%d type=%"PRIu32" len=%"PRIu32" errno=%d (%s)\n",
+	      srv->socket, pkt->type, pkt->len, err, strerror(err));
 	srv->running = false;
 	return false;
 }
@@ -34,7 +36,9 @@ bool client_recv_packet(Server *srv, Packet *pkt) {
 		print_packet("client-recv:", pkt);
 		return true;
 	}
-	debug("client-recv: failed socket=%d errno=%d\n", srv->socket, errno);
+	int err = errno;
+	debug("client-recv: failed socket=%d errno=%d (%s)\n",
+	      srv->socket, err, strerror(err));
 	srv->running = false;
 	return false;
 }

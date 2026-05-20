@@ -120,7 +120,9 @@ static bool server_read_pty(Server *srv, Packet *pkt) {
 		debug("server-read-pty: EOF pty=%d\n", srv->pty);
 		srv->running = false;
 	} else if (len == -1 && errno != EAGAIN && errno != EINTR && errno != EWOULDBLOCK) {
-		debug("server-read-pty: failed pty=%d errno=%d\n", srv->pty, errno);
+		int err = errno;
+		debug("server-read-pty: failed pty=%d errno=%d (%s)\n",
+		      srv->pty, err, strerror(err));
 		srv->running = false;
 	}
 	return len > 0;
@@ -132,8 +134,9 @@ static bool server_write_pty(Server *srv, Packet *pkt) {
 	ssize_t written = write_all(srv->pty, pkt->u.msg, size);
 	if (written >= 0 && (size_t)written == size)
 		return true;
-	debug("server-write-pty: failed pty=%d type=%"PRIu32" len=%"PRIu32" written=%zd errno=%d\n",
-	      srv->pty, pkt->type, pkt->len, written, errno);
+	int err = errno;
+	debug("server-write-pty: failed pty=%d type=%"PRIu32" len=%"PRIu32" written=%zd errno=%d (%s)\n",
+	      srv->pty, pkt->type, pkt->len, written, err, strerror(err));
 	srv->running = false;
 	return false;
 }
@@ -143,8 +146,9 @@ static bool server_recv_packet(Client *c, Packet *pkt) {
 		print_packet("server-recv:", pkt);
 		return true;
 	}
-	debug("server-recv: failed client-fd=%d state=%s errno=%d\n",
-	      c->socket, client_state_name(c->state), errno);
+	int err = errno;
+	debug("server-recv: failed client-fd=%d state=%s errno=%d (%s)\n",
+	      c->socket, client_state_name(c->state), err, strerror(err));
 	c->state = STATE_DISCONNECTED;
 	return false;
 }
@@ -153,8 +157,10 @@ static bool server_send_packet(Client *c, Packet *pkt) {
 	print_packet("server-send:", pkt);
 	if (send_packet(c->socket, pkt))
 		return true;
-	debug("server-send: failed client-fd=%d state=%s type=%"PRIu32" len=%"PRIu32" errno=%d\n",
-	      c->socket, client_state_name(c->state), pkt->type, pkt->len, errno);
+	int err = errno;
+	debug("server-send: failed client-fd=%d state=%s type=%"PRIu32" len=%"PRIu32" errno=%d (%s)\n",
+	      c->socket, client_state_name(c->state), pkt->type, pkt->len,
+	      err, strerror(err));
 	c->state = STATE_DISCONNECTED;
 	return false;
 }
@@ -189,18 +195,22 @@ void server_sigterm_handler(int sig) {
 static Client *server_accept_client(Server *srv) {
 	int newfd = accept(srv->socket, NULL, NULL);
 	if (newfd == -1) {
-		debug("server-accept: failed socket=%d errno=%d\n", srv->socket, errno);
+		int err = errno;
+		debug("server-accept: failed socket=%d errno=%d (%s)\n",
+		      srv->socket, err, strerror(err));
 		goto error;
 	}
 	if (server_set_socket_non_blocking(newfd) == -1) {
-		debug("server-accept: nonblock failed client-fd=%d errno=%d\n",
-		      newfd, errno);
+		int err = errno;
+		debug("server-accept: nonblock failed client-fd=%d errno=%d (%s)\n",
+		      newfd, err, strerror(err));
 		goto error;
 	}
 	Client *c = client_malloc(newfd);
 	if (!c) {
-		debug("server-accept: client allocation failed client-fd=%d errno=%d\n",
-		      newfd, errno);
+		int err = errno;
+		debug("server-accept: client allocation failed client-fd=%d errno=%d (%s)\n",
+		      newfd, err, strerror(err));
 		goto error;
 	}
 	if (!srv->clients)
@@ -396,9 +406,10 @@ void server_mainloop(Server *srv) {
 							ws.ws_row = client_packet.u.ws.rows;
 							ws.ws_col = client_packet.u.ws.cols;
 							if (ioctl(srv->pty, TIOCSWINSZ, &ws) == -1) {
-								debug("server-resize: ioctl failed pty=%d cols=%"PRIu16" rows=%"PRIu16" errno=%d\n",
+								int err = errno;
+								debug("server-resize: ioctl failed pty=%d cols=%"PRIu16" rows=%"PRIu16" errno=%d (%s)\n",
 								      srv->pty, (uint16_t)ws.ws_col,
-								      (uint16_t)ws.ws_row, errno);
+								      (uint16_t)ws.ws_row, err, strerror(err));
 							} else {
 								debug("server-resize: pty=%d cols=%"PRIu16" rows=%"PRIu16"\n",
 								      srv->pty, (uint16_t)ws.ws_col,
@@ -415,9 +426,11 @@ void server_mainloop(Server *srv) {
 					struct termios t;
 					if (tcgetattr(srv->pty, &t) == 0) {
 						char eof_char = t.c_cc[VEOF];
-						if (write(srv->pty, &eof_char, 1) < 0)
-							debug("server-stdin-eof: write failed pty=%d errno=%d\n",
-							      srv->pty, errno);
+						if (write(srv->pty, &eof_char, 1) < 0) {
+							int err = errno;
+							debug("server-stdin-eof: write failed pty=%d errno=%d (%s)\n",
+							      srv->pty, err, strerror(err));
+						}
 					}
 					break;
 				}
