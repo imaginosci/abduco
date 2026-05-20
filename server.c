@@ -64,33 +64,46 @@ static void server_sink_client(Server *srv) {
 
 static void server_mark_socket_exec(bool exec, bool usr) {
 	struct stat sb;
-	if (stat(session_socket_path(), &sb) == -1)
+	if (stat(session_socket_path(), &sb) == -1) {
+		debug_errno("server-socket-mode: stat failed path=%s",
+		            session_socket_path());
 		return;
+	}
 	mode_t mode = sb.st_mode;
 	mode_t flag = usr ? S_IXUSR : S_IXGRP;
 	if (exec)
 		mode |= flag;
 	else
 		mode &= ~flag;
-	chmod(session_socket_path(), mode);
+	if (chmod(session_socket_path(), mode) == -1) {
+		debug_errno("server-socket-mode: chmod failed path=%s mode=%o",
+		            session_socket_path(), mode);
+	}
 }
 
 int server_create_socket(const char *name) {
-	if (!session_set_socket_name(active_server, name))
+	if (!session_set_socket_name(active_server, name)) {
+		debug("server-create-socket: invalid session name=%s\n", name);
 		return -1;
+	}
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (fd == -1)
+	if (fd == -1) {
+		debug_errno("server-create-socket: socket failed");
 		return -1;
+	}
 	mode_t mask = umask(S_IXUSR|S_IRWXG|S_IRWXO);
 	int r = session_socket_bind(fd);
 	umask(mask);
 
 	if (r == -1) {
+		debug_errno("server-create-socket: bind failed fd=%d path=%s",
+		            fd, session_socket_path());
 		close(fd);
 		return -1;
 	}
 
 	if (listen(fd, 5) == -1) {
+		debug_errno("server-create-socket: listen failed fd=%d", fd);
 		session_unlink_socket();
 		close(fd);
 		return -1;
@@ -101,8 +114,10 @@ int server_create_socket(const char *name) {
 
 int server_set_socket_non_blocking(int sock) {
 	int flags;
-	if ((flags = fcntl(sock, F_GETFL, 0)) == -1)
+	if ((flags = fcntl(sock, F_GETFL, 0)) == -1) {
+		debug_errno("server-nonblock: F_GETFL failed fd=%d", sock);
 		flags = 0;
+	}
     	return fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 }
 
@@ -120,9 +135,7 @@ static bool server_read_pty(Server *srv, Packet *pkt) {
 		debug("server-read-pty: EOF pty=%d\n", srv->pty);
 		srv->running = false;
 	} else if (len == -1 && errno != EAGAIN && errno != EINTR && errno != EWOULDBLOCK) {
-		int err = errno;
-		debug("server-read-pty: failed pty=%d errno=%d (%s)\n",
-		      srv->pty, err, strerror(err));
+		debug_errno("server-read-pty: failed pty=%d", srv->pty);
 		srv->running = false;
 	}
 	return len > 0;
@@ -134,9 +147,8 @@ static bool server_write_pty(Server *srv, Packet *pkt) {
 	ssize_t written = write_all(srv->pty, pkt->u.msg, size);
 	if (written >= 0 && (size_t)written == size)
 		return true;
-	int err = errno;
-	debug("server-write-pty: failed pty=%d type=%"PRIu32" len=%"PRIu32" written=%zd errno=%d (%s)\n",
-	      srv->pty, pkt->type, pkt->len, written, err, strerror(err));
+	debug_errno("server-write-pty: failed pty=%d type=%"PRIu32" len=%"PRIu32" written=%zd",
+	            srv->pty, pkt->type, pkt->len, written);
 	srv->running = false;
 	return false;
 }
@@ -146,9 +158,8 @@ static bool server_recv_packet(Client *c, Packet *pkt) {
 		print_packet("server-recv:", pkt);
 		return true;
 	}
-	int err = errno;
-	debug("server-recv: failed client-fd=%d state=%s errno=%d (%s)\n",
-	      c->socket, client_state_name(c->state), err, strerror(err));
+	debug_errno("server-recv: failed client-fd=%d state=%s",
+	            c->socket, client_state_name(c->state));
 	c->state = STATE_DISCONNECTED;
 	return false;
 }
@@ -157,10 +168,8 @@ static bool server_send_packet(Client *c, Packet *pkt) {
 	print_packet("server-send:", pkt);
 	if (send_packet(c->socket, pkt))
 		return true;
-	int err = errno;
-	debug("server-send: failed client-fd=%d state=%s type=%"PRIu32" len=%"PRIu32" errno=%d (%s)\n",
-	      c->socket, client_state_name(c->state), pkt->type, pkt->len,
-	      err, strerror(err));
+	debug_errno("server-send: failed client-fd=%d state=%s type=%"PRIu32" len=%"PRIu32,
+	            c->socket, client_state_name(c->state), pkt->type, pkt->len);
 	c->state = STATE_DISCONNECTED;
 	return false;
 }
@@ -195,22 +204,17 @@ void server_sigterm_handler(int sig) {
 static Client *server_accept_client(Server *srv) {
 	int newfd = accept(srv->socket, NULL, NULL);
 	if (newfd == -1) {
-		int err = errno;
-		debug("server-accept: failed socket=%d errno=%d (%s)\n",
-		      srv->socket, err, strerror(err));
+		debug_errno("server-accept: failed socket=%d", srv->socket);
 		goto error;
 	}
 	if (server_set_socket_non_blocking(newfd) == -1) {
-		int err = errno;
-		debug("server-accept: nonblock failed client-fd=%d errno=%d (%s)\n",
-		      newfd, err, strerror(err));
+		debug_errno("server-accept: nonblock failed client-fd=%d", newfd);
 		goto error;
 	}
 	Client *c = client_malloc(newfd);
 	if (!c) {
-		int err = errno;
-		debug("server-accept: client allocation failed client-fd=%d errno=%d (%s)\n",
-		      newfd, err, strerror(err));
+		debug_errno("server-accept: client allocation failed client-fd=%d",
+		            newfd);
 		goto error;
 	}
 	if (!srv->clients)
@@ -244,9 +248,14 @@ void server_sigusr1_handler(int sig) {
 		return;
 	int socket = server_create_socket(srv->session_name);
 	if (socket != -1) {
+		debug("server-sigusr1: recreated socket old-fd=%d new-fd=%d\n",
+		      srv->socket, socket);
 		if (srv->socket)
 			close(srv->socket);
 		srv->socket = socket;
+	} else {
+		debug("server-sigusr1: socket recreation failed session=%s\n",
+		      srv->session_name);
 	}
 }
 
@@ -406,10 +415,9 @@ void server_mainloop(Server *srv) {
 							ws.ws_row = client_packet.u.ws.rows;
 							ws.ws_col = client_packet.u.ws.cols;
 							if (ioctl(srv->pty, TIOCSWINSZ, &ws) == -1) {
-								int err = errno;
-								debug("server-resize: ioctl failed pty=%d cols=%"PRIu16" rows=%"PRIu16" errno=%d (%s)\n",
-								      srv->pty, (uint16_t)ws.ws_col,
-								      (uint16_t)ws.ws_row, err, strerror(err));
+								debug_errno("server-resize: ioctl failed pty=%d cols=%"PRIu16" rows=%"PRIu16,
+								            srv->pty, (uint16_t)ws.ws_col,
+								            (uint16_t)ws.ws_row);
 							} else {
 								debug("server-resize: pty=%d cols=%"PRIu16" rows=%"PRIu16"\n",
 								      srv->pty, (uint16_t)ws.ws_col,
@@ -418,7 +426,16 @@ void server_mainloop(Server *srv) {
 						}
 
 						group_id = tcgetpgrp(srv->pty);
-						kill(-group_id, SIGWINCH);
+						if (group_id == -1) {
+							debug_errno("server-resize: tcgetpgrp failed pty=%d",
+							            srv->pty);
+						} else if (kill(-group_id, SIGWINCH) == -1) {
+							debug_errno("server-resize: SIGWINCH failed pty=%d pgrp=%d",
+							            srv->pty, group_id);
+						} else {
+							debug("server-resize: SIGWINCH sent pgrp=%d\n",
+							      group_id);
+						}
 						break;
 					}
 				case MSG_STDIN_EOF: {
@@ -427,10 +444,12 @@ void server_mainloop(Server *srv) {
 					if (tcgetattr(srv->pty, &t) == 0) {
 						char eof_char = t.c_cc[VEOF];
 						if (write(srv->pty, &eof_char, 1) < 0) {
-							int err = errno;
-							debug("server-stdin-eof: write failed pty=%d errno=%d (%s)\n",
-							      srv->pty, err, strerror(err));
+							debug_errno("server-stdin-eof: write failed pty=%d",
+							            srv->pty);
 						}
+					} else {
+						debug_errno("server-stdin-eof: tcgetattr failed pty=%d",
+						            srv->pty);
 					}
 					break;
 				}

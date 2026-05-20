@@ -3,7 +3,6 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/select.h>
 
 #include "client.h"
@@ -24,9 +23,8 @@ static bool client_send_packet(Server *srv, Packet *pkt) {
 	print_packet("client-send:", pkt);
 	if (send_packet(srv->socket, pkt))
 		return true;
-	int err = errno;
-	debug("client-send: failed socket=%d type=%"PRIu32" len=%"PRIu32" errno=%d (%s)\n",
-	      srv->socket, pkt->type, pkt->len, err, strerror(err));
+	debug_errno("client-send: failed socket=%d type=%"PRIu32" len=%"PRIu32,
+	            srv->socket, pkt->type, pkt->len);
 	srv->running = false;
 	return false;
 }
@@ -36,9 +34,7 @@ bool client_recv_packet(Server *srv, Packet *pkt) {
 		print_packet("client-recv:", pkt);
 		return true;
 	}
-	int err = errno;
-	debug("client-recv: failed socket=%d errno=%d (%s)\n",
-	      srv->socket, err, strerror(err));
+	debug_errno("client-recv: failed socket=%d", srv->socket);
 	srv->running = false;
 	return false;
 }
@@ -57,8 +53,10 @@ void client_set_passthrough(bool enabled) {
 }
 
 struct termios *client_capture_terminal(void) {
-	if (tcgetattr(STDIN_FILENO, &orig_term) == -1)
+	if (tcgetattr(STDIN_FILENO, &orig_term) == -1) {
+		debug_errno("client-terminal: tcgetattr failed fd=%d", STDIN_FILENO);
 		return NULL;
+	}
 	has_term = true;
 	return &orig_term;
 }
@@ -66,7 +64,9 @@ struct termios *client_capture_terminal(void) {
 void client_restore_terminal(void) {
 	if (!has_term)
 		return;
-	tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term);
+	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_term) == -1) {
+		debug_errno("client-terminal: restore failed fd=%d", STDIN_FILENO);
+	}
 	if (alternate_buffer) {
 		printf("\033[?25h\033[?1049l");
 		fflush(stdout);
@@ -88,7 +88,9 @@ void client_setup_terminal(void) {
 	cur_term.c_cc[VLNEXT] = _POSIX_VDISABLE;
 	cur_term.c_cc[VMIN] = 1;
 	cur_term.c_cc[VTIME] = 0;
-	tcsetattr(STDIN_FILENO, TCSANOW, &cur_term);
+	if (tcsetattr(STDIN_FILENO, TCSANOW, &cur_term) == -1) {
+		debug_errno("client-terminal: setup failed fd=%d", STDIN_FILENO);
+	}
 
 	if (!alternate_buffer) {
 		printf("\033[?1049h\033[H");
@@ -130,6 +132,9 @@ int client_mainloop(Server *srv) {
 				};
 				if (client_send_packet(srv, &pkt))
 					client.need_resize = false;
+			} else {
+				debug_errno("client-resize: TIOCGWINSZ failed fd=%d",
+				            STDIN_FILENO);
 			}
 		}
 
