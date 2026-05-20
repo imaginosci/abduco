@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: ISC
 #include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
@@ -22,7 +23,8 @@ static bool client_send_packet(Server *srv, Packet *pkt) {
 	print_packet("client-send:", pkt);
 	if (send_packet(srv->socket, pkt))
 		return true;
-	debug("FAILED\n");
+	debug("client-send: failed socket=%d type=%"PRIu32" len=%"PRIu32" errno=%d\n",
+	      srv->socket, pkt->type, pkt->len, errno);
 	srv->running = false;
 	return false;
 }
@@ -32,7 +34,7 @@ bool client_recv_packet(Server *srv, Packet *pkt) {
 		print_packet("client-recv:", pkt);
 		return true;
 	}
-	debug("client-recv: FAILED\n");
+	debug("client-recv: failed socket=%d errno=%d\n", srv->socket, errno);
 	srv->running = false;
 	return false;
 }
@@ -158,11 +160,15 @@ int client_mainloop(Server *srv) {
 			if (len == -1 && errno != EAGAIN && errno != EINTR)
 				die("client-stdin");
 			if (len > 0) {
-				debug("client-stdin: %c\n", pkt.u.msg[0]);
+				debug("client-stdin: read len=%zd first=0x%02x readonly=%d\n",
+				      len, (unsigned char)pkt.u.msg[0],
+				      !!(client.flags & CLIENT_READONLY));
 				pkt.len = len;
 				if (redraw_key && pkt.u.msg[0] == redraw_key) {
+					debug("client-stdin: redraw key received\n");
 					client.need_resize = true;
 				} else if (pkt.u.msg[0] == detach_key) {
+					debug("client-stdin: detach key received\n");
 					pkt.type = MSG_DETACH;
 					pkt.len = 0;
 					client_send_packet(srv, &pkt);
@@ -172,7 +178,7 @@ int client_mainloop(Server *srv) {
 					client_send_packet(srv, &pkt);
 				}
 			} else if (len == 0) {
-				debug("client-stdin: EOF\n");
+				debug("client-stdin: EOF, forwarding MSG_STDIN_EOF\n");
 				Packet eof_pkt = { .type = MSG_STDIN_EOF, .len = 0 };
 				client_send_packet(srv, &eof_pkt);
 				stdin_eof = true;

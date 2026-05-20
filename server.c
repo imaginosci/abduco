@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: ISC
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
@@ -19,6 +20,21 @@ static Server *active_server;
 		if (fd > maxfd)         \
 			maxfd = fd;     \
 	} while (0)
+
+static const char *client_state_name(int state) {
+	switch (state) {
+	case STATE_CONNECTED:
+		return "connected";
+	case STATE_ATTACHED:
+		return "attached";
+	case STATE_DETACHED:
+		return "detached";
+	case STATE_DISCONNECTED:
+		return "disconnected";
+	default:
+		return "unknown";
+	}
+}
 
 static Client *client_malloc(int socket) {
 	Client *c = calloc(1, sizeof(Client));
@@ -97,13 +113,16 @@ void server_set_active(Server *srv) {
 static bool server_read_pty(Server *srv, Packet *pkt) {
 	pkt->type = MSG_CONTENT;
 	ssize_t len = read(srv->pty, pkt->u.msg, sizeof(pkt->u.msg));
-	if (len > 0)
+	if (len > 0) {
 		pkt->len = len;
-	else if (len == 0)
+		print_packet("server-read-pty:", pkt);
+	} else if (len == 0) {
+		debug("server-read-pty: EOF pty=%d\n", srv->pty);
 		srv->running = false;
-	else if (len == -1 && errno != EAGAIN && errno != EINTR && errno != EWOULDBLOCK)
+	} else if (len == -1 && errno != EAGAIN && errno != EINTR && errno != EWOULDBLOCK) {
+		debug("server-read-pty: failed pty=%d errno=%d\n", srv->pty, errno);
 		srv->running = false;
-	print_packet("server-read-pty:", pkt);
+	}
 	return len > 0;
 }
 
@@ -113,7 +132,8 @@ static bool server_write_pty(Server *srv, Packet *pkt) {
 	ssize_t written = write_all(srv->pty, pkt->u.msg, size);
 	if (written >= 0 && (size_t)written == size)
 		return true;
-	debug("FAILED\n");
+	debug("server-write-pty: failed pty=%d type=%"PRIu32" len=%"PRIu32" written=%zd errno=%d\n",
+	      srv->pty, pkt->type, pkt->len, written, errno);
 	srv->running = false;
 	return false;
 }
@@ -123,7 +143,8 @@ static bool server_recv_packet(Client *c, Packet *pkt) {
 		print_packet("server-recv:", pkt);
 		return true;
 	}
-	debug("server-recv: FAILED\n");
+	debug("server-recv: failed client-fd=%d state=%s errno=%d\n",
+	      c->socket, client_state_name(c->state), errno);
 	c->state = STATE_DISCONNECTED;
 	return false;
 }
@@ -132,7 +153,8 @@ static bool server_send_packet(Client *c, Packet *pkt) {
 	print_packet("server-send:", pkt);
 	if (send_packet(c->socket, pkt))
 		return true;
-	debug("FAILED\n");
+	debug("server-send: failed client-fd=%d state=%s type=%"PRIu32" len=%"PRIu32" errno=%d\n",
+	      c->socket, client_state_name(c->state), pkt->type, pkt->len, errno);
 	c->state = STATE_DISCONNECTED;
 	return false;
 }
@@ -142,6 +164,7 @@ void server_pty_died_handler(int sig) {
 	Server *srv = active_server;
 	int errsv = errno;
 	pid_t pid;
+	pid_t child = -1;
 
 	if (!srv)
 		return;
@@ -149,11 +172,12 @@ void server_pty_died_handler(int sig) {
 	while ((pid = waitpid(-1, &srv->exit_status, WNOHANG)) != 0) {
 		if (pid == -1)
 			break;
+		child = pid;
 		srv->exit_status = WEXITSTATUS(srv->exit_status);
 		server_mark_socket_exec(true, false);
 	}
 
-	debug("server pty died: %d\n", srv->exit_status);
+	debug("server-pty-died: pid=%d exit-status=%d\n", child, srv->exit_status);
 	errno = errsv;
 }
 
@@ -164,11 +188,21 @@ void server_sigterm_handler(int sig) {
 
 static Client *server_accept_client(Server *srv) {
 	int newfd = accept(srv->socket, NULL, NULL);
-	if (newfd == -1 || server_set_socket_non_blocking(newfd) == -1)
+	if (newfd == -1) {
+		debug("server-accept: failed socket=%d errno=%d\n", srv->socket, errno);
 		goto error;
+	}
+	if (server_set_socket_non_blocking(newfd) == -1) {
+		debug("server-accept: nonblock failed client-fd=%d errno=%d\n",
+		      newfd, errno);
+		goto error;
+	}
 	Client *c = client_malloc(newfd);
-	if (!c)
+	if (!c) {
+		debug("server-accept: client allocation failed client-fd=%d errno=%d\n",
+		      newfd, errno);
 		goto error;
+	}
 	if (!srv->clients)
 		server_mark_socket_exec(true, true);
 	c->socket = newfd;
@@ -176,6 +210,8 @@ static Client *server_accept_client(Server *srv) {
 	c->next = srv->clients;
 	srv->clients = c;
 	srv->read_pty = true;
+	debug("server-accept: client-fd=%d state=%s\n",
+	      c->socket, client_state_name(c->state));
 
 	Packet pkt = {
 		.type = MSG_PID,
@@ -343,6 +379,10 @@ void server_mainloop(Server *srv) {
 					break;
 				case MSG_ATTACH:
 					c->flags = client_packet.u.i;
+					debug("server-attach: client-fd=%d flags=0x%"PRIx32" readonly=%d low-priority=%d\n",
+					      c->socket, (uint32_t)c->flags,
+					      !!(c->flags & CLIENT_READONLY),
+					      !!(c->flags & CLIENT_LOWPRIORITY));
 					if (c->flags & CLIENT_LOWPRIORITY)
 						server_sink_client(srv);
 					server_send_screen_buffer(srv, c);
@@ -352,11 +392,18 @@ void server_mainloop(Server *srv) {
 
 						c->state = STATE_ATTACHED;
 						if (!(c->flags & CLIENT_READONLY) && c == srv->clients) {
-							debug("server-ioct: TIOCSWINSZ\n");
 							struct winsize ws = { 0 };
 							ws.ws_row = client_packet.u.ws.rows;
 							ws.ws_col = client_packet.u.ws.cols;
-							ioctl(srv->pty, TIOCSWINSZ, &ws);
+							if (ioctl(srv->pty, TIOCSWINSZ, &ws) == -1) {
+								debug("server-resize: ioctl failed pty=%d cols=%"PRIu16" rows=%"PRIu16" errno=%d\n",
+								      srv->pty, (uint16_t)ws.ws_col,
+								      (uint16_t)ws.ws_row, errno);
+							} else {
+								debug("server-resize: pty=%d cols=%"PRIu16" rows=%"PRIu16"\n",
+								      srv->pty, (uint16_t)ws.ws_col,
+								      (uint16_t)ws.ws_row);
+							}
 						}
 
 						group_id = tcgetpgrp(srv->pty);
@@ -369,7 +416,8 @@ void server_mainloop(Server *srv) {
 					if (tcgetattr(srv->pty, &t) == 0) {
 						char eof_char = t.c_cc[VEOF];
 						if (write(srv->pty, &eof_char, 1) < 0)
-							debug("MSG_STDIN_EOF write failed\n");
+							debug("server-stdin-eof: write failed pty=%d errno=%d\n",
+							      srv->pty, errno);
 					}
 					break;
 				}
@@ -377,6 +425,9 @@ void server_mainloop(Server *srv) {
 					exit_packet_delivered = true;
 					/* fall through */
 				case MSG_DETACH:
+					debug("server-disconnect: client-fd=%d reason=%s\n",
+					      c->socket,
+					      client_packet.type == MSG_EXIT ? "exit" : "detach");
 					c->state = STATE_DISCONNECTED;
 					break;
 				default: /* ignore package */
@@ -386,10 +437,13 @@ void server_mainloop(Server *srv) {
 
 			if (c->state == STATE_DISCONNECTED) {
 				bool first = (c == srv->clients);
+				int socket = c->socket;
 				Client *t = c->next;
 				if (c->msg_exit_sent)
 					exit_packet_delivered = true;
 				client_free(c);
+				debug("server-client-free: client-fd=%d first=%d remaining=%d\n",
+				      socket, first, t != NULL);
 				*prev_next = c = t;
 				if (first && srv->clients) {
 					Packet pkt = {

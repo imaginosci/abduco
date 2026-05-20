@@ -10,8 +10,11 @@
 #include "packet.h"
 
 #if defined(NDEBUG) || !defined(DEBUG_FD)
-#define debug(...) ((void)0)
-#define print_packet(prefix, pkt) ((void)(prefix), (void)(pkt))
+static inline void debug(const char *, ...) {
+}
+
+static inline void print_packet(const char *, const Packet *) {
+}
 #else
 #define debug(...) dprintf(DEBUG_FD, __VA_ARGS__)
 
@@ -23,33 +26,33 @@ static inline void print_packet(const char *prefix, const Packet *pkt) {
 		[MSG_RESIZE]  = "RESIZE",
 		[MSG_EXIT]    = "EXIT",
 		[MSG_PID]     = "PID",
+		[MSG_STDIN_EOF] = "STDIN_EOF",
 	};
 	const char *type = "UNKNOWN";
 	if (pkt->type < countof(msgtype) && msgtype[pkt->type])
 		type = msgtype[pkt->type];
 
-	dprintf(DEBUG_FD, "%s: %s ", prefix, type);
+	dprintf(DEBUG_FD, "%s type=%s(%"PRIu32") len=%"PRIu32,
+	        prefix, type, pkt->type, pkt->len);
 	switch (pkt->type) {
 	case MSG_CONTENT:
-		write(DEBUG_FD, pkt->u.msg, pkt->len);
 		break;
 	case MSG_RESIZE:
-		dprintf(DEBUG_FD, "%"PRIu16"x%"PRIu16,
+		dprintf(DEBUG_FD, " cols=%"PRIu16" rows=%"PRIu16,
 		        pkt->u.ws.cols, pkt->u.ws.rows);
 		break;
 	case MSG_ATTACH:
-		dprintf(DEBUG_FD, "readonly: %d low-priority: %d",
+		dprintf(DEBUG_FD, " readonly=%d low-priority=%d",
 		        pkt->u.i & CLIENT_READONLY,
 		        pkt->u.i & CLIENT_LOWPRIORITY);
 		break;
 	case MSG_EXIT:
-		dprintf(DEBUG_FD, "status: %"PRIu32, pkt->u.i);
+		dprintf(DEBUG_FD, " status=%"PRIu32, pkt->u.i);
 		break;
 	case MSG_PID:
-		dprintf(DEBUG_FD, "pid: %"PRIu32, pkt->u.i);
+		dprintf(DEBUG_FD, " pid=%"PRIu64, pkt->u.l);
 		break;
 	default:
-		dprintf(DEBUG_FD, "len: %"PRIu32, pkt->len);
 		break;
 	}
 	dprintf(DEBUG_FD, "\n");
