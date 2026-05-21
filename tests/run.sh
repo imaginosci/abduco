@@ -17,6 +17,10 @@ export ROOT ABDUCO
 
 if [ -z "$ABDUCO_TEST_TTY" ] && [ ! -t 0 ]; then
 	case "$(uname)" in
+	SunOS)
+		echo "skip - integration tests require a tty on SunOS"
+		exit 0
+		;;
 	Darwin|FreeBSD|DragonFly|NetBSD)
 		exec script -q /dev/null env ABDUCO_TEST_TTY=1 ROOT="$ROOT" ABDUCO="$ABDUCO" sh "$0" "$@"
 		;;
