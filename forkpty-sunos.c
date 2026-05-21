@@ -18,6 +18,7 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <strings.h>
 #include <stropts.h>
@@ -26,7 +27,11 @@
 #include "abduco.h"
 
 #ifndef TTY_NAME_MAX
-#define TTY_NAME_MAX TTYNAME_MAX
+# ifdef TTYNAME_MAX
+#  define TTY_NAME_MAX TTYNAME_MAX
+# else
+#  define TTY_NAME_MAX 128
+# endif
 #endif
 
 pid_t forkpty(int *master, char *name, struct termios *tio, struct winsize *ws)
