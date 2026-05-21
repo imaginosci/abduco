@@ -138,6 +138,48 @@ return 1
 fi
 }
 
+trystackprotector () {
+printf "checking whether compiler can link with -fstack-protector-all... "
+cat > "$tmpc" <<EOF
+int main(void) {
+	char buf[1024];
+	buf[0] = 0;
+	return buf[0];
+}
+EOF
+if ! $CC $CPPFLAGS $CFLAGS_STD $CFLAGS $CFLAGS_AUTO \
+     -fstack-protector-all -c -o "$tmpo" "$tmpc" >/dev/null 2>&1 ; then
+printf "no\n"
+return 1
+fi
+if $CC "$tmpo" $LDFLAGS $LDFLAGS_STD $LDFLAGS_AUTO \
+   -o "$tmpx" >/dev/null 2>&1 ; then
+printf "yes\n"
+CFLAGS_AUTO="$CFLAGS_AUTO -fstack-protector-all"
+CFLAGS_AUTO=${CFLAGS_AUTO# }
+return 0
+elif $CC "$tmpo" $LDFLAGS $LDFLAGS_STD $LDFLAGS_AUTO \
+     -fstack-protector-all -o "$tmpx" >/dev/null 2>&1 ; then
+printf "yes, with link flag\n"
+CFLAGS_AUTO="$CFLAGS_AUTO -fstack-protector-all"
+CFLAGS_AUTO=${CFLAGS_AUTO# }
+LDFLAGS_AUTO="$LDFLAGS_AUTO -fstack-protector-all"
+LDFLAGS_AUTO=${LDFLAGS_AUTO# }
+return 0
+elif $CC "$tmpo" $LDFLAGS $LDFLAGS_STD $LDFLAGS_AUTO \
+     -o "$tmpx" -lssp >/dev/null 2>&1 ; then
+printf "yes, with -lssp\n"
+CFLAGS_AUTO="$CFLAGS_AUTO -fstack-protector-all"
+CFLAGS_AUTO=${CFLAGS_AUTO# }
+LDFLAGS_AUTO="$LDFLAGS_AUTO -lssp"
+LDFLAGS_AUTO=${LDFLAGS_AUTO# }
+return 0
+else
+printf "no\n"
+return 1
+fi
+}
+
 # Beginning of actual script
 
 CFLAGS_AUTO=
@@ -195,11 +237,12 @@ set -C
 while : ; do i=$(($i+1))
 tmpc="./conf$$-$PPID-$i.c"
 tmpo="./conf$$-$PPID-$i.o"
+tmpx="./conf$$-$PPID-$i.exe"
 2>|/dev/null > "$tmpc" && break
 test "$i" -gt 50 && fail "$0: cannot create temporary file $tmpc"
 done
 set +C
-trap 'rm -f "$tmpc" "$tmpo"' EXIT INT QUIT TERM HUP
+trap 'rm -f "$tmpc" "$tmpo" "$tmpx"' EXIT INT QUIT TERM HUP
 
 #
 # Find a C compiler to use
@@ -266,7 +309,7 @@ tryldflag LDFLAGS_AUTO -Wl,--gc-sections
 
 # Try hardening flags
 tryflag CFLAGS -fPIE
-tryflag CFLAGS_AUTO -fstack-protector-all
+trystackprotector
 tryldflag LDFLAGS -Wl,-z,now
 tryldflag LDFLAGS -Wl,-z,relro
 tryldflag LDFLAGS_AUTO -pie
