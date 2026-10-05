@@ -263,12 +263,17 @@ static void server_send_screen_buffer(Server *srv, Client *c) {
 	struct entry *np;
 
 	TAILQ_FOREACH_REVERSE(np, &srv->screen, screenhead, entries) {
-		Packet pkt = {
-			.type = MSG_CONTENT,
-			.len = np->len,
-		};
-		strncpy(pkt.u.msg, np->data, np->len);
-		server_send_packet(c, &pkt);
+		size_t offset = 0;
+		while (offset < np->len) {
+			Packet pkt = { .type = MSG_CONTENT };
+			size_t chunk = np->len - offset;
+			if (chunk > sizeof(pkt.u.msg))
+				chunk = sizeof(pkt.u.msg);
+			pkt.len = chunk;
+			memcpy(pkt.u.msg, np->data + offset, chunk);
+			server_send_packet(c, &pkt);
+			offset += chunk;
+		}
 	}
 }
 
@@ -286,17 +291,15 @@ static void server_preserve_screen_data(Server *srv, Packet *pkt) {
 
 	while (str != end) {
 		char *data;
-		uint32_t i, dlen;
+		uint32_t dlen;
 
 		bool newline = false;
 		char *token = end;
 
-		for (i = 0; i < len; i++) {
-			if (str[i] == '\n') {
-				token = str + i + 1;
-				newline = true;
-				break;
-			}
+		char *nl = memchr(str, '\n', len);
+		if (nl) {
+			token = nl + 1;
+			newline = true;
 		}
 
 		if ((dlen = token - str) <= 0)
