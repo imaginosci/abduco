@@ -67,7 +67,7 @@ typedef struct {
 	Client *clients;
 	int socket;
 	int pty;
-	int exit_status;
+	volatile sig_atomic_t exit_status;
 	struct termios *term;
 	struct winsize winsize;
 	struct screenhead screen;

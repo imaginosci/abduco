@@ -2,11 +2,13 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 
 #include "debug.h"
 #include "io.h"
@@ -184,11 +186,12 @@ void server_pty_died_handler(int sig) {
 	if (!srv)
 		return;
 
-	while ((pid = waitpid(-1, &srv->exit_status, WNOHANG)) != 0) {
+	int status = 0;
+	while ((pid = waitpid(-1, &status, WNOHANG)) != 0) {
 		if (pid == -1)
 			break;
 		child = pid;
-		srv->exit_status = WEXITSTATUS(srv->exit_status);
+		srv->exit_status = WEXITSTATUS(status);
 		server_mark_socket_exec(true, false);
 	}
 
@@ -360,6 +363,13 @@ static void server_preserve_screen_data(Server *srv, Packet *pkt) {
 void server_mainloop(Server *srv) {
 	server_set_active(srv);
 	atexit(session_unlink_socket);
+
+	sigset_t emptyset, blockset;
+	sigemptyset(&emptyset);
+	sigemptyset(&blockset);
+	sigaddset(&blockset, SIGCHLD);
+	sigprocmask(SIG_BLOCK, &blockset, NULL);
+
 	fd_set new_readfds, new_writefds;
 	FD_ZERO(&new_readfds);
 	FD_ZERO(&new_writefds);
@@ -378,10 +388,13 @@ void server_mainloop(Server *srv) {
 		fd_set writefds = new_writefds;
 		FD_SET_MAX(srv->socket, &readfds, fdmax);
 
-		if (select(fdmax+1, &readfds, &writefds, NULL, NULL) == -1) {
-			if (errno == EINTR)
-				continue;
-			die("server-mainloop");
+		if (pselect(fdmax+1, &readfds, &writefds, NULL, NULL, &emptyset) == -1) {
+			if (errno == EINTR) {
+				FD_ZERO(&readfds);
+				FD_ZERO(&writefds);
+			} else {
+				die("server-mainloop");
+			}
 		}
 
 		FD_ZERO(&new_readfds);
@@ -502,7 +515,7 @@ void server_mainloop(Server *srv) {
 			if (pty_data)
 				server_send_packet(c, &server_packet);
 			if (!srv->running) {
-				if (srv->exit_status != -1) {
+				if (srv->exit_status != -1 && !c->msg_exit_sent) {
 					Packet pkt = {
 						.type = MSG_EXIT,
 						.u.i = (uint32_t)srv->exit_status,
@@ -512,8 +525,6 @@ void server_mainloop(Server *srv) {
 						c->msg_exit_sent = true;
 					else
 						FD_SET_MAX(c->socket, &new_writefds, new_fdmax);
-				} else {
-					FD_SET_MAX(c->socket, &new_writefds, new_fdmax);
 				}
 			}
 			prev_next = &c->next;
